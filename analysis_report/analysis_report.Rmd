@@ -1,0 +1,387 @@
+---
+title: "Data Analysis Report"
+author: "Niklas Johannes"
+date: "10/2/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: default
+    highlight: default
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+This file explains all data processing and analysis steps for [Project Title].
+The RProject has a private library in order to make all steps computationally reproducible.
+I use the `renv` package for this.
+That means you will need to install the package and might need run the `renv::restore` command, see instructions [here](https://github.com/rstudio/renv).
+```{r load_libraries}
+# pacman makes it easier to load and install packages
+if (!requireNamespace("pacman"))
+  install.packages("pacman")
+
+library(pacman)
+
+p_load(
+  knitr,
+  MASS,
+  Matrix,
+  mgcv,
+  tidyverse,
+  here,
+  DT
+)
+
+set.seed(42)
+```
+
+Below the custom functions I'll be using throughout the script.
+```{r functions}
+# function that transforms feet and inches to cm
+feet_inches_to_cm <- 
+  function(feet, inches){
+    feet_to_cm <- feet * 30.48
+    inches_to_cm <- inches * 2.54
+    cm <- feet_to_cm + inches_to_cm
+    cm <- round(cm, digits = 0)
+    
+    return(cm)
+  }
+
+# function that transforms stones and pounds to kg
+stones_pounds_to_kg <-
+  function(pounds, stones=NULL){
+    if(missing(stones)){
+      pounds_to_kg <- pounds * 0.453592
+      kg <- pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+    else{
+      stones_to_kg <- stones * 6.35029
+      pounds_to_kg <- pounds * 0.453592
+      kg <- stones_to_kg + pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+  }
+```
+
+# 1. Load and wrangle data
+First, we load the data.
+For a codebook, see the [enter file name] file.
+Note that the Qualtrics output format is quite the nightmare for importang; found a solution [here](https://stackoverflow.com/questions/50314805/how-to-import-qualtrics-data-in-csv-format-into-r).
+```{r load_data}
+headers <- read_csv(
+  here('data', 'raw_data.csv'),
+  col_names = FALSE,
+  n_max = 1) %>%
+  as.character() # variable names stored in a vector
+
+raw_data <- read_csv(
+  here('data', 'raw_data.csv'),
+  col_names = headers, # use that name vector here to name variables
+  na = "",
+  skip = 3 # those are the three rows that contain the variable info
+  )
+
+rm(headers) # clear names from workspace
+```
+
+The data frame is extremely wide; we have `r ncol(raw_data)` variables.
+This has several reasons:
+
+* Qualtrics data are generally in the wide format, so each stimulus gets a column rather than a row
+* What label type was assigned to which food type for attractiveness ratings was counterbalanced, such that there were two sets, each containing 40 variables (= 80 total)
+* Participants only answered one set, but both sets are contained in the data, meaning that participants will have entries for one set of variables, but only NA for the other set
+* Each stimulus was timed, meaning Qualtrics measured four additional variables per stimulus: first click, last click, number of clicks, and after how much time the page was submitted
+* This means in addition to the 80 stimulus variables, there are 80 (the two sets) x 4 (timing variables) = `r 80 * 4` variables just for attractiveness ratings (total `r 80 + 80 * 4` attractiveness variables)
+* This entire procedure also applies to simulation ratings, doubling the number of stimulus rating variables (`r 80 * 5 * 2` total rating variables)
+* The remaining `r ncol(raw_data) - 80 * 5 * 2` are demographic etc. variables
+
+We need to get these data into the long format.
+Before that, let's only keep those variables we need and simultaneously give them proper names.
+Also, the `response_id` already is a unique identifier, but not easy to read.
+I'll add a participant number (`pp`).
+Last, because I'm cleaning the raw data, I'll use a new data object: `working_file`
+```{r select_and_rename}
+working_file <- 
+  raw_data %>% 
+  select(
+    start_date = StartDate,
+    end_date = EndDate,
+    duration = `Duration (in seconds)`,
+    finished = Finished,
+    response_id = ResponseId,
+    fullfil_criteria = Q3,
+    consent = Q8,
+    prolific_id = Q9,
+    group = Group,
+    hungry = Q11_1,
+    thirsty = Q11_2,
+    desire_instructions_time = `Q13_Page Submit`,
+    pb_1_c_attr_1:`mb_20_enh_attr_time_Click Count`, # all attractiveness variables
+    simulations_instructions_time = `Q41_Page Submit`,
+    pb_1_c_sim_1:`mb_20_enh_sim_time_Click Count`, # all simulation variables
+    age = Q19,
+    gender = Q20,
+    height_choice = Q21,
+    height_cm = Q22_1,
+    height_feet = Q23_1,
+    height_inches = Q23_2,
+    weight_choice = Q24,
+    weight_kilos = Q25_1,
+    weight_stones = Q26_1,
+    weight_pounds = Q26_2,
+    weight_pounds_only = Q27_1,
+    diet = Q28,
+    diet_details = Q29,
+    meat_per_week = Q30,
+    change_diet = Q31_1,
+    attitude_meat = attitude_meat_1,
+    attitude_vegan = attitude_vegan_1,
+    attitude_pb = attitude_pb_1,
+    allergies = Q32,
+    allergies_details = Q33,
+    language_issues = Q34,
+    language_issues_details = Q35,
+    didnt_like = Q36,
+    study_about = Q37,
+    technical_issues = Q38,
+    -contains("Click"), # omit click count variables
+  ) %>%
+  mutate(pp = paste0("pp_", row_number())) %>%
+  select(# add participant number and set it as first column
+    pp,
+    everything()
+  )
+```
+
+Next, I assign the correct variable type.
+In addition, I exported the Qualtrics data with numbers as output, so I will reintroduce the factor levels for factor variables.
+```{r change_types}
+working_file <-
+  working_file %>% 
+  mutate_at(
+    vars(
+      pp,
+      finished,
+      response_id:group,
+      gender,
+      height_choice,
+      weight_choice,
+      diet,
+      allergies,
+      language_issues
+    ),
+    list(~ as.factor(.))
+  ) %>% 
+  mutate(
+    finished = fct_recode(
+      finished,
+      no = "0",
+      yes = "1"
+    ),
+    gender = fct_recode(
+      gender,
+      male = "1",
+      female = "2",
+      other = "3"
+    ),
+    diet = fct_recode(
+      diet,
+      omnivore = "1",
+      pescatarian = "2",
+      vegetarian = "3",
+      vegan = "4",
+      other = "5"
+    ),
+    height_choice = fct_recode(
+      height_choice,
+      cm = "1",
+      feet_inches = "2"
+    ),
+    weight_choice = fct_recode(
+      weight_choice,
+      kg = "1",
+      stones_pounds = "2",
+      pounds_only = "3"
+    )
+  ) %>% 
+  mutate_at(
+    vars(
+      fullfil_criteria,
+      consent,
+      allergies,
+      language_issues
+    ),
+    list(
+      ~ fct_recode(
+        .,
+        yes = "1",
+        no = "2"
+      )
+    )
+  )
+```
+
+Upon inspection, I saw that meat eating frequency (`meat_per_week`) has two non-numerical entries: `1/2` and `less than once`.
+I don't want to remove the latter, so I'll convert both to a number (0.5).
+```{r recode meat_per_week}
+working_file <-
+  working_file %>%
+  mutate(
+    meat_per_week = case_when(
+      meat_per_week %in% c("1/2", "less than once") ~ 0.5,
+      TRUE ~ as.numeric(meat_per_week)
+    )
+  )
+```
+
+Similarly, there are text entries in `weight_kilos` and `weight_pounds`.
+In `weight_kilos` there's a text entry explaining that the respondent doesn't know their weight, so we'll set that to NA.
+In `weight_pounds`, the respondent indicated stones, but `"N/A"` for pounds, so we'll set that to 0, assuming the respondent weighed around the indicated weight in stones.
+We'll do the same for all those who only provided stones, but no pounds.
+```{r recode_weight}
+working_file <- 
+  working_file %>% 
+  mutate(
+    weight_kilos = as.numeric(
+      na_if(weight_kilos, "I don't lnow unfortuantely and I do not have acces to a set of scales qhilw filling out this survey. I applogise for this, but I was not informed I would need this prior to starting the survey.")
+    ),
+    weight_pounds = as.numeric(
+      na_if(weight_pounds, "N/A")
+    ),
+    weight_pounds = case_when(
+      weight_choice == "stones_pounds" & is.na(weight_pounds) ~ 0,
+      TRUE ~ weight_pounds
+    )
+  )
+```
+
+Because the study was conducted in the UK, we also need to transform height and weight to cm and kg, respectively.
+```{r transform_height_weight}
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = case_when(
+      height_choice == "cm" ~ height_cm,
+      height_choice == "feet_inches" ~ feet_inches_to_cm(height_feet, height_inches)
+    ),
+    weight_kilos = case_when(
+      weight_choice == "kg" ~ weight_kilos,
+      weight_choice == "stones_pounds" ~ stones_pounds_to_kg(weight_pounds, weight_stones),
+      weight_choice == "pounds_only" ~ stones_pounds_to_kg(weight_pounds_only) 
+    )
+  )
+```
+
+Now that the data are cleaned, I can finally transform them to the long format.
+Currently, the measurements of attractiveness and simulations are in the following format: **pb_1_c_attr_1**. The components (separated by underscores) of that format mean:
+
+* **food type**: pb (plant-based) or mb(meat-based)
+* **stimulus number**
+* **label type**: c (control) or enh (enhanced)
+* **measurement/DV**: attr (attractiveness) or sim (simulations)
+* meaningless Qualtrics appendix: always `_1`
+
+Let's remove the `_1` at the end of those variable names, and also rename all `Page Submit` appendices from their variable names.
+```{r remove_1}
+working_file <-
+  working_file %>% 
+  rename_at(
+    vars(
+      ends_with("_1"),
+    ),
+    list(
+      ~ str_sub(
+        ., 1, str_length(.)-2
+      )
+    )
+  ) %>% 
+  rename_at(
+    vars(
+      ends_with("Page Submit")
+    ),
+    list(
+      ~ str_replace(
+        ., "_Page Submit", ""
+      )
+    )
+  )
+```
+
+Let's get to turning the data into the long format.
+Because we used two sets of stimuli (counterbalancing what stimulus belongs to what food type and label type), half of the participants gave responses to half of the measurement variables; the other half of participant gave responses to the other half.
+
+Therefore, participants will have missing values on those variables that belonged to the other set (i.e., the other counterbalancing condition).
+Luckily, the `pivot_longer` function is amazing, so we can drop those measurements per participants with the `values_drop_na` argument.
+```{r turn_long}
+working_file <- 
+  working_file %>% 
+  pivot_longer(
+    cols = c(contains("pb_"), contains("mb_")),
+    names_to = c( # specifict the variables to be formed from the current variable names
+      "food_type", 
+      "stimulus_no",
+      "label_type",
+      "measure"
+      ),
+    values_to = c( # the values, which will be measurement type (attractiveness vs. simulations) and the timer per variable
+      "rating", 
+      "time"
+      ),
+    names_sep = "_",
+    values_drop_na = TRUE # do not include empty entries due to counterbalancing as rows in the long format
+  ) %>%
+  
+  # give proper variable names, labels, and variable types
+  mutate(
+    stimulus_no = as.numeric(stimulus_no)
+  ) %>% 
+  mutate(
+    food_type = fct_recode(
+      as.factor(food_type),
+      meat_based = "mb",
+      plant_based = "pb",
+    ),
+    label_type = fct_recode(
+      as.factor(label_type),
+      control = "c",
+      enhanced = "enh"
+    ),
+    measure = fct_recode(
+      as.factor(measure),
+      attractiveness = "attr",
+      simulations = "sim"
+    )
+  ) %>% # arbitrary, but I like to order the variables roughly in the order they were collected
+  select(
+    pp:simulations_instructions_time,
+    food_type:time,
+    everything()
+  )
+```
+
+Alright, the data are in a tidy format.
+Below, I show the data of a random participant for illustration.
+```{r tidy_data, echo=FALSE}
+DT::datatable(
+  working_file %>% 
+    filter(pp == "pp_100"),
+  options = list(
+    autoWidth = TRUE,
+    scrollY = TRUE,
+    scrollX = TRUE, 
+    pageLength = 5
+  )
+  )
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
