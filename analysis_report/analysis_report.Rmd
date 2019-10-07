@@ -12,7 +12,10 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE,
+                      cache = TRUE)
 ```
 
 This file explains all data processing and analysis steps for [Project Title].
@@ -26,21 +29,30 @@ if (!requireNamespace("pacman"))
 
 library(pacman)
 
+# load packages
 p_load(
   knitr,
   MASS,
   Matrix,
   mgcv,
-  tidyverse,
+  Rmisc,
   here,
-  DT
+  DT,
+  cowplot,
+  pastecs,
+  tidyverse
 )
 
+# set seed
 set.seed(42)
+
+# set theme for ggplot
+theme_set(theme_cowplot())
 ```
 
 Below the custom functions I'll be using throughout the script.
 ```{r functions}
+### FUNCTION 1 ###
 # function that transforms feet and inches to cm
 feet_inches_to_cm <- 
   function(feet, inches){
@@ -52,6 +64,7 @@ feet_inches_to_cm <-
     return(cm)
   }
 
+### FUNCTION 2 ###
 # function that transforms stones and pounds to kg
 stones_pounds_to_kg <-
   function(pounds, stones=NULL){
@@ -71,9 +84,222 @@ stones_pounds_to_kg <-
       return(kg)
     }
   }
+
+### FUNCTION 3 ###
+# function that gives summary statistics and a densityplot, with different levels of repeated vs. trait-like measures
+describe_visualize <- 
+  function(df, 
+           variable, 
+           repeated_measure = FALSE,
+           want_summary = FALSE){
+    
+    variable <- enquo(variable)
+    
+    # specifies whether the variable we want to plot is a trait-like or repeated measure
+    if (repeated_measure == FALSE){
+      df <-
+        df %>%
+        group_by(pp) %>%
+        slice(1) %>% 
+        ungroup()
+    } else {
+      df <-
+        df
+    }
+    
+    # descriptive stats
+    sum_stats <-
+      df %>% 
+      pull(!! variable) %>% 
+      stat.desc()
+    
+    # plot
+    plot <-
+      ggplot(df, aes(x = !! variable)) +
+        geom_density(color = "darkgrey", fill = "darkgrey") +
+        geom_point(aes(x = !! variable, y = 0))
+    
+    # return the two (if both are wanted)
+    if(want_summary == TRUE){
+      return(list(kable(sum_stats), plot))
+    } else{
+      return(plot)
+    }
+  }
+
+### FUNCTION 4 ###
+# function that returns a table for trait-like categorical variables
+my_table <-
+  function(df, variable){
+    variable <- enquo(variable)
+    
+    df %>% 
+      group_by(pp) %>% 
+      slice(1) %>% 
+      pull(!! variable) %>% 
+      table()
+  }
+
+### FUNCTION 5 ###
+# raincloud plot function from https://github.com/RainCloudPlots/RainCloudPlots/blob/master/tutorial_R/R_rainclouds.R
+# Defining the geom_flat_violin function ----
+# Note: the below code modifies the
+# existing github page by removing a parenthesis in line 50
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @export
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        group_by(group) %>%
+        mutate(
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+
+    draw_group = function(data, panel_scales, coord) {
+      # Find the points for the line to go all the way around
+      data <- transform(data,
+        xminv = x,
+        xmaxv = x + violinwidth * (xmax - x)
+      )
+
+      # Make sure it's sorted properly to draw the outline
+      newdata <- rbind(
+        plyr::arrange(transform(data, x = xminv), y),
+        plyr::arrange(transform(data, x = xmaxv), -y)
+      )
+
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1, ])
+
+      ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+
+    draw_key = draw_key_polygon,
+
+    default_aes = aes(
+      weight = 1, colour = "grey20", fill = "white", size = 0.5,
+      alpha = NA, linetype = "solid"
+    ),
+
+    required_aes = c("x", "y")
+  )
+
+### FUNCTION 6 ###
+# creates raincloud plots
+rc_plot <-
+  function(
+    df,
+    measurement,
+    variable,
+    group,
+    xlab,
+    title,
+    facet = NULL
+  ) {
+    rc_plot <-
+    ggplot(
+      df %>%
+        filter(measure == measurement),
+      aes_string(
+        x = group,
+        y = variable,
+        fill = group,
+        color = group
+      )
+    ) +
+      geom_flat_violin(position = position_nudge(x = .2,
+                                                 y = 0),
+                       adjust = 2) +
+      geom_point(position = position_jitter(width = .15),
+                 size = .10) +
+      ylab("Rating (0-100)") +
+      xlab(xlab) +
+      coord_flip() +
+      guides(fill = FALSE,
+             color = FALSE) +
+      scale_color_brewer(palette = "Dark2") +
+      scale_fill_brewer(palette = "Dark2") +
+      ggtitle(title)
+    
+    if(!is.null(facet)){
+      rc_plot <-
+      rc_plot +
+        facet_wrap(facet)
+    }
+    
+    return(rc_plot)
+  }
+
+### FUNCTION 6 ###
+# creates line plots
+line_plot <-
+  function(
+    df,
+    x_group,
+    measure,
+    group_by
+  ) {
+    
+    measure <- enquo(measure)
+    
+    ggplot(df,
+           aes_string(
+             x = x_group,
+             y = measure,
+             group = group_by,
+             color = group_by,
+             linetype = group_by
+           )
+    ) +
+      geom_line() +
+      geom_point() +
+      geom_errorbar(
+        aes(
+          ymin = !! measure - se,
+          ymax = !! measure + se),
+        width = .05) +
+      scale_color_brewer(palette = "Dark2")
+  }
 ```
 
 # 1. Load and wrangle data
+## 1.1 Load data
 First, we load the data.
 For a codebook, see the [enter file name] file.
 Note that the Qualtrics output format is quite the nightmare for importang; found a solution [here](https://stackoverflow.com/questions/50314805/how-to-import-qualtrics-data-in-csv-format-into-r).
@@ -105,6 +331,7 @@ This has several reasons:
 * This entire procedure also applies to simulation ratings, doubling the number of stimulus rating variables (`r 80 * 5 * 2` total rating variables)
 * The remaining `r ncol(raw_data) - 80 * 5 * 2` are demographic etc. variables
 
+## 1.2 Wrangling
 We need to get these data into the long format.
 Before that, let's only keep those variables we need and simultaneously give them proper names.
 Also, the `response_id` already is a unique identifier, but not easy to read.
@@ -317,6 +544,7 @@ working_file <-
   )
 ```
 
+## 1.3 Tidy data
 Let's get to turning the data into the long format.
 Because we used two sets of stimuli (counterbalancing what stimulus belongs to what food type and label type), half of the participants gave responses to half of the measurement variables; the other half of participant gave responses to the other half.
 
@@ -382,6 +610,525 @@ DT::datatable(
     pageLength = 5
   )
   )
+```
+
+# 2. Exclusions
+
+## 2.1 Exclude test runs
+There are still three test runs left.
+They can easily be identified because they do not follow the Prolific ID scheme (i.e., starting with a `5`, less than 20 characters).
+We exclude them here.
+```{r exclude_test_runs}
+# before excluding testruns
+length(unique(working_file$pp))
+
+working_file <- 
+  working_file %>% 
+  filter(
+    str_length(
+      as.character(prolific_id)
+      ) > 20
+    )
+
+# # after exclusion
+length(unique(working_file$pp))
+```
+
+Now exclude those who didn't finish the survey.
+```{r exclude_nonfinished}
+length(unique(working_file$pp))
+
+working_file <-
+  working_file %>% 
+  filter(finished == "yes")
+
+length(unique(working_file$pp))
+```
+
+Out of experience, Qualtrics isn't very good at determining whether a survey is finished or not.
+We double check this:
+If indeed all participants gave all ratings, there should be 80 for each of the remaining `r length(unique((working_file$pp)))` participants: 40 attractiveness ratings and 40 simulations ratings.
+Furthermore, there should be few `NA`s remaining on any of the ratings.
+
+There are three cases where participants did not report a rating.
+I double checked that in the raw data file and that's indeed the case.
+Respondents were not forced to give a response (Qualtrics option was "Request Response"), so participants simply did not respond to those three items.
+```{r check_total_n}
+# does each participant have 80 ratings (i.e., rows)?
+working_file %>% 
+  group_by(pp) %>% 
+  count() %>%
+  ungroup() %>% 
+  summarize(
+    all_there = sum(n == 80)
+  )
+
+# compare to sample
+length(unique(working_file$pp))
+
+# are there NAs left on the rating or timing variable?
+working_file %>% 
+  select(rating, time) %>% 
+  summarize_all(
+    list(~ sum(is.na(.)))
+  )
+
+working_file %>% 
+  filter(is.na(rating)) %>% 
+  DT::datatable(
+  .,
+  options = list(
+    autoWidth = TRUE,
+    scrollY = TRUE,
+    scrollX = TRUE, 
+    pageLength = 3
+  )
+  )
+```
+
+## 2.3 Not fulfilling inclusion criteria
+There was a filter question at the beginning of the study asking participants whether they fulfill the inclusion criteria.
+All participants indicated they fulfilled the criteria, so no need to exclude anyone.
+```{r fulfill_inclusion}
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  pull(fullfil_criteria) %>% 
+  table()
+```
+
+
+## 2.3 Identify rushed responses
+In the preregistration, we specified data quality checks: if participants do not comply with the experimental instructions or give (almost) exactly the same response on each trial (i.e., within 1 of 100 scale points).
+
+To identify possibly rushed responses, we inspect the variation of ratings and compare those to the how quickly participants responded.
+
+The variation looks fine, nobody just clicked the same point of the scale repeatedly.
+One participant was extremely fast, spending about 1.5 seconds per rating, possibly hinting at randomly clicking through.
+```{r response_variation}
+# lowest variation of the ratings
+working_file %>% 
+  group_by(pp) %>% 
+  summarize(
+    mean = (mean(rating, na.rm = TRUE)),
+    sd = sd(rating, na.rm = TRUE)
+  ) %>% 
+  arrange(sd)
+
+# check response times
+time_means <-
+  working_file %>% 
+  group_by(pp) %>% 
+  summarize(
+    time_mean = mean(time)
+  ) %>% 
+  arrange(time_mean)
+
+# inspect the fastest times
+head(time_means, n = 10)
+
+# compare to median time
+median(working_file$time)
+
+# plot them
+time_means %>% 
+  ggplot(aes(x = time_mean)) +
+  geom_density(color = "darkgrey", fill = "darkgrey") +
+  geom_point(aes(x = time_mean, y = 0))
+
+# clear from workspace
+rm(time_means)
+```
+
+# 3. Describe and visualize
+
+## 3.1 Meta-data
+How long did participants spend on the survey?
+Median duration is around ~ 13 minutes.
+```{r describe_duration}
+describe_visualize(
+  working_file,
+  duration,
+  FALSE,
+  TRUE
+)
+```
+
+How long did they spend on the instructions for the attractiveness and simulations, respectively?
+Overall not long (~ 10 seconds), but some apparently left the window open for quite some time.
+```{r describe_instructions}
+describe_visualize(
+  working_file,
+  desire_instructions_time,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  simulations_instructions_time,
+  FALSE,
+  TRUE
+)
+```
+
+Were there language issues?
+Barely, and the qualitative answers don't give cause for concern.
+```{r describe_language}
+my_table(working_file, language_issues)
+
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  filter(language_issues == "yes") %>% 
+  pull(language_issues_details)
+```
+
+## 3.2 Demographic information
+First, I look at hunger and thirst ratings.
+Participants seemed to be more thirsty than hungry.
+```{r describe_hunger_thirst}
+describe_visualize(
+  working_file,
+  hungry,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  thirsty,
+  FALSE,
+  TRUE
+)
+```
+
+What's the age range in our sample?
+One participant indicated to be `r working_file %>% pull(age) %>% max()` years old.
+Probably a typo, but not sure whether it's supposed to be 25 or 59, so I set that value to `NA`.
+```{r describe_age}
+describe_visualize(
+  working_file,
+  age,
+  FALSE,
+  TRUE
+)
+
+working_file <-
+  working_file %>% 
+  mutate(
+    age = if_else(age == 259, NA_real_, age)
+  )
+
+describe_visualize(
+  working_file,
+  age,
+  FALSE,
+  TRUE
+)
+```
+
+What gender distribution is in our sample?
+```{r describe_gender}
+my_table(working_file, gender)
+```
+
+What's the height distribution?
+One participant appears to be giant.
+I think this is too unrealistic.
+We could think about whether that participant took the survey seriously, but the ratings and duration on instruction look good when inspecting the raw data.
+After setting that entry to missing, the rest looks pretty normal.
+```{r describe_height}
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = if_else(height_cm == 290, NA_real_, height_cm)
+  )
+
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+```
+
+Let's look at the weight.
+There's a couple of participants who indicated to weigh less than 20 kilos.
+I find that hard to believe and set their weight as missing.
+```{r describe_weight}
+describe_visualize(
+  working_file,
+  weight_kilos,
+  FALSE,
+  TRUE
+)
+
+working_file %>% 
+  filter(weight_kilos < 20) %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(pp, contains("weight"))
+
+working_file <-
+  working_file %>% 
+  mutate(
+    weight_kilos = if_else(weight_kilos < 20, NA_real_, weight_kilos)
+  )
+
+describe_visualize(
+  working_file,
+  weight_kilos,
+  FALSE,
+  TRUE
+)
+```
+
+Next, some information about their diet.
+
+* participants seem to be divided on whether they're trying to change their diet
+* frequent meat eaters
+* like meat better than vegan or plant-based foods
+```{r describe_diet}
+# diet
+my_table(working_file, diet)
+
+# how often they eat meat per week
+describe_visualize(
+  working_file,
+  meat_per_week,
+  FALSE,
+  TRUE
+)
+
+# to what extent participants are currently trying to change their diets
+describe_visualize(
+  working_file,
+  change_diet,
+  FALSE,
+  TRUE
+)
+
+# attitudes toward eating meat
+describe_visualize(
+  working_file,
+  attitude_meat,
+  FALSE,
+  TRUE
+)
+
+# attitudes toward vegan food
+describe_visualize(
+  working_file,
+  attitude_vegan,
+  FALSE,
+  TRUE
+)
+
+# attitude toward plant-based food
+describe_visualize(
+  working_file,
+  attitude_pb,
+  FALSE,
+  TRUE
+)
+
+# whether participants have food allergies
+my_table(working_file, allergies)
+```
+
+## 3.3 Ratings
+Next, I visualize the ratings on attractiveness and simulations, respectively.
+I'll first visualize and describe them overall, then per factor level (as in two main effects of label type and food type), and then the interaction.
+
+### 3.1 Attractiveness
+First, I inspect the overall attractiveness ratings, regardless of label or food type.
+```{r attr_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "attractiveness"),
+  rating,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with ratings per label type.
+Doesn't look like there's much of a difference.
+```{r describe_attr_label_type}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Let's inspect the ratings per food type.
+People seem to like meat-based labels more.
+```{r describe_attr_food_type}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Attractiveness Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Next, I inspect the interaction of label type and food type for attractiveness ratings.
+The raincloud plots are not that easy to read (even if I add means with CIs), so for easier visualization I use a line plot on the aggregated means with within-subject standard error (from the `Rmisc::summarySEwithin` function).
+```{r describe_attr_interaction}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_attr <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "attractiveness") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating = mean(rating, na.rm = TRUE)),
+    measurevar = "rating",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at means and SDs
+summary_attr
+
+# line graph
+line_plot(
+  summary_attr,
+  "label_type",
+  rating,
+  "food_type"
+)
+```
+
+### 3.2 Simulations
+First, I inspect the overall simulations ratings, regardless of label or food type.
+```{r simulations_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "simulations"),
+  rating,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with simulations ratings per label type.
+Doesn't look like there's much of a difference.
+```{r describe_sim_label_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Simulations Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Let's inspect the ratings per food type.
+People seem to simulate more with meat-based labels.
+```{r describe_sim_food_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Simulations Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Next, I inspect the interaction of label type and food type for simulations ratings with rainclouds and line graphs.
+```{r describe_sim_interaction}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_sim <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "simulations") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating = mean(rating, na.rm = TRUE)),
+    measurevar = "rating",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at Ms and SDs
+summary_sim
+
+# line graph
+line_plot(
+  summary_sim,
+  "label_type",
+  rating,
+  "food_type"
+)
 ```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
