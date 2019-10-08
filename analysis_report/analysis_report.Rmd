@@ -735,16 +735,117 @@ time_means %>%
   ggplot(aes(x = time_mean)) +
   geom_density(color = "darkgrey", fill = "darkgrey") +
   geom_point(aes(x = time_mean, y = 0))
+```
 
-# clear from workspace
-rm(time_means)
+*Note: This is not preregistered.*
+It's pretty hard to tell what mean time on answering items indicates inattentiveness.
+However, we can at least set those mean times into relation with the sample median time.
+[Leiner](https://www.researchgate.net/profile/Dominik_Leiner/publication/258997762_Too_Fast_Too_Straight_Too_Weird_Post_Hoc_Identification_of_Meaningless_Data_in_Internet_Surveys/links/59e4596baca2724cbfe85921/Too-Fast-Too-Straight-Too-Weird-Post-Hoc-Identification-of-Meaningless-Data-in-Internet-Surveys.pdf) has put forward a useful way to identify meaningless data in internet studies, validated with real and simulated data.
+
+The method is relatively straightforward: The Relative Speed Index (RSI) gives an impression of how fast participants responded to items without giving too much weight to quick or slow responses on individual stimuli.
+An RSI of > 1.75 is considered an indicator of meaningless data (actually, it might even be conservative).
+
+The RSI is computed as follows:
+
+* Compute sample's median completion time for each page
+* Divide those sample completion times by the individual respondents' page completion time (i.e., speed factors)
+* Trim these speed factors to an interval of [0|3]
+* Average the trimmed speed factors per participant to obtain the RSI
+```{r cumpute_rsi}
+working_file <-
+  working_file %>% 
+  
+  # calculate median time for each stimulus (aka page)
+  group_by(
+    food_type,
+    stimulus_no,
+    label_type,
+    measure
+  ) %>% 
+  summarize(
+    page_time_median = median(time)
+  ) %>% 
+  
+  # add those median page times to the data set and match with the stimuli there
+  left_join(
+    working_file,
+    .,
+    by = c(
+      "food_type",
+      "stimulus_no",
+      "label_type",
+      "measure"
+    )
+  ) %>% 
+  
+  # now divide the median page completion time by the individual page completion time (so per row)
+  mutate(
+    speed_factor = page_time_median / time
+  ) %>% 
+  
+  # trim to [0|3]: dividing by zero will yield a speed factor of Inf, anything else a higher number
+  mutate(
+    speed_factor_trimmed = case_when(
+      speed_factor == Inf ~ 0,
+      speed_factor > 3 ~ 3,
+      TRUE ~ speed_factor
+    )
+  ) %>% 
+  
+  # average those trimmed speed factors to obtain RSI
+  group_by(pp) %>% 
+  mutate(
+    rsi = mean(speed_factor_trimmed)
+  ) %>% 
+  ungroup()
+```
+
+Let's inspect the RSI.
+Indeed, there is at least one massive outlier, and several RSIs > 1.75.
+If we inspect mean completion time side by side with RSI, we see that several of those participants we suspected rushed through also come up here.
+We thus exclude those participants with an RSI > 1.75.
+**Note: this decision was not preregistered, but we logged it in a decision log file.**
+
+I'll run the analyses with and without these `r length(unique((working_file$pp))) - nrow(working_file %>% filter(rsi <= 1.75) %>% group_by(pp) %>% slice(1))` cases, so I'll put their data into a separate object.
+```{r exclude_rsi}
+# let's plot them
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ggplot(aes(x = rsi)) +
+  geom_density() +
+  geom_point(aes(x = rsi, y = 0))
+
+# compare with raw mean time per page
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  arrange(desc(rsi)) %>%
+  select(pp, rsi) %>% 
+  left_join(., 
+            time_means,
+            by = "pp"
+  )
+
+# how many do we exclude?
+length(unique((working_file$pp))) - nrow(working_file %>% filter(rsi <= 1.75) %>% group_by(pp) %>% slice(1))
+
+# create a separate file for those cases that we add when we test the robustness of the analysis
+high_rsi <-
+  working_file %>% 
+  filter(rsi > 1.75)
+
+# remove them from working file
+working_file <-
+  working_file %>% 
+  filter(rsi <= 1.75)
 ```
 
 # 3. Describe and visualize
 
 ## 3.1 Meta-data
 How long did participants spend on the survey?
-Median duration is around ~ 13 minutes.
+Median duration is around ~ 14 minutes.
 ```{r describe_duration}
 describe_visualize(
   working_file,
@@ -755,7 +856,7 @@ describe_visualize(
 ```
 
 How long did they spend on the instructions for the attractiveness and simulations, respectively?
-Overall not long (~ 10 seconds), but some apparently left the window open for quite some time.
+Overall not long (~ 10 seconds), but some apparently left the browser window open for quite some time.
 ```{r describe_instructions}
 describe_visualize(
   working_file,
@@ -829,7 +930,7 @@ describe_visualize(
 )
 ```
 
-What gender distribution is in our sample?
+What is the gender distribution in our sample?
 ```{r describe_gender}
 my_table(working_file, gender)
 ```
