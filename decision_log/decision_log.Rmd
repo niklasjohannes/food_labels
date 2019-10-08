@@ -1,0 +1,26 @@
+---
+title: "Decision Log"
+author: '[blinded]'
+date: "10/8/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Here, we detail decisions we made during data analysis that represent deviations or clarifications from the preregistration.
+
+# Decision 1
+
+**When**: 2019-10-08 12:18 BST
+
+**Category**: Data exclusions
+
+When data processing, we discovered that several participants went through the simuli ratings rather quickly.
+We believe that these data are low-quality, rushed responses.
+We thus decided to use the Relative Speed Index (RSI) by [Leiner](https://www.researchgate.net/profile/Dominik_Leiner/publication/258997762_Too_Fast_Too_Straight_Too_Weird_Post_Hoc_Identification_of_Meaningless_Data_in_Internet_Surveys/links/59e4596baca2724cbfe85921/Too-Fast-Too-Straight-Too-Weird-Post-Hoc-Identification-of-Meaningless-Data-in-Internet-Surveys.pdf) to formally identify rushed responses.
+
+Specifically, we decided to exclude those participants with an RSI > 1.75.
+We made that decision **before** data analysis, but **after** having looked at visualizations and descriptive statistics.
+We will analyze all models with and without those participants we exclude based on RSI and report where the conclusions change as a result of their in/exclusion. 
