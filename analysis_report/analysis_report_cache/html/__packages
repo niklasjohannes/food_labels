@@ -12,6 +12,8 @@ here
 DT
 cowplot
 pastecs
+lme4
+afex
 tidyverse
 ggplot2
 tibble

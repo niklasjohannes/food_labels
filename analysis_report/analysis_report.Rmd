@@ -40,6 +40,8 @@ p_load(
   DT,
   cowplot,
   pastecs,
+  lme4,
+  afex,
   tidyverse
 )
 
@@ -1230,6 +1232,172 @@ line_plot(
   rating,
   "food_type"
 )
+```
+
+# 4. Analysis
+I now move to the actual analysis.
+I will structure the analysis section per hypothesis, and each hypothesis with a confirmatory/preregistered and an exploratory sub-section.
+I will note and explain deviations from the preregistrations wherever applicable.
+After the hypothesis sections, I'll also describe exploratory results.
+
+## 4.1 H1: Main effect of food label
+The preregistered hypothesis reads as follows:
+>>Simulation and attractiveness will be higher for foods with enhanced compared to neutral labels.
+
+### 4.1.1 Confirmatory
+I'll start with confirmatory model. 
+Note that the preregistration was imprecise when saying that we will predict the outcome with food type and label type.
+It actually means controlling for food **item** as random effect.
+Thus, we specify a model with maximal effects.
+
+Before we can do that, we need to add the individual food item as a factor to the data set.
+As of now, we only have the food type plus a stimulus number, which together create 40 unique food items.
+I'll add them here; for a full description, see the OSM materials.
+```{r add_food_items}
+# file that contains the foods
+food_items <-
+  read_csv(
+    here("data", "food_items.csv"),
+    col_types = list(
+      col_factor(levels = NULL),
+      col_number(),
+      col_factor(levels = NULL)
+    )
+  )
+
+head(food_items, n = 5)
+
+working_file <-
+  working_file %>% 
+  left_join(
+    .,
+    food_items,
+    by = c("food_type",
+           "stimulus_no")
+  ) %>% 
+  select(
+    pp:stimulus_no,
+    food,
+    everything()
+  )
+```
+
+
+#### Simulations
+Construct the main effects model: predict simulations by label type.
+Because we're only interested in the main effects, I'll use dummy coding for the predictor; we only have two levels and Type 2 or 3 sums of Squares will be the same.
+The model converges without problems.
+```{r h1_sim_model}
+# set contrasts
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+# construct model
+h1_sim <- lme4::lmer(
+  rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  working_file %>% 
+    filter(measure == "simulations")
+)
+
+# inspect model
+summary(h1_sim)
+```
+
+Now let's inspect model diagnostics.
+The residuals look normally distributed; the proportion of large residuals is fine; the Q-Q-plot also looks fine.
+
+However, there are clear cut-offs in the predicted vs. residuals plot.
+That's because the outcome variable has (0 | 100) bounds.
+For example, a fitted value of 50 can be off by a maximum of -50 or 50, not lower or higher.
+Usually, this pattern happens with binomial distributions.
+However, I don't think this would be appropriate here: a) the residuals are normally distributed; b) I would argue that a 100 rating slider is conceptually rather different than a proportion (I wouldn't know how to count successes and failures for a binomial distribution). 
+Therefore, I will maintain the linear model, because I believe it makes sense conceptually and displays decent fit.
+```{r h1_sim_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h1_sim, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h1_sim, scaled = TRUE))
+
+# proportion of outliers
+sum(abs(resid(h1_sim, scaled = TRUE)) > 2) / length(resid(h1_sim))
+sum(abs(resid(h1_sim, scaled = TRUE)) > 2.5) / length(resid(h1_sim))
+sum(abs(resid(h1_sim, scaled = TRUE)) > 3) / length(resid(h1_sim))
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h1_sim, type = c('p', 'smooth'))
+
+# get p-value
+h1_sim_p <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    working_file %>% 
+      filter(measure == "simulations"),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+summary(h1_sim_p)
+```
+
+### Attractiveness
+
+Next, I run the same model, but with `attractiveness` as outcome.
+```{r h1_attr_model}
+# construct model
+h1_attr <- lme4::lmer(
+  rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  working_file %>% 
+    filter(measure == "attractiveness")
+)
+
+# inspect model
+summary(h1_attr)
+```
+
+Let's inspect model diagnostics.
+Now let's inspect model diagnostics.
+```{r}
+# inspect standardized residuals
+densityplot(resid(h1_attr, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h1_attr, scaled = TRUE))
+
+# proportion of outliers
+sum(abs(resid(h1_attr, scaled = TRUE)) > 2) / length(resid(h1_attr))
+sum(abs(resid(h1_attr, scaled = TRUE)) > 2.5) / length(resid(h1_attr))
+sum(abs(resid(h1_attr, scaled = TRUE)) > 3) / length(resid(h1_attr))
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h1_attr, type = c('p', 'smooth'))
+
+# get p-value
+h1_attr_p <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    working_file %>% 
+      filter(measure == "attractiveness"),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_attr_p) 
 ```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
