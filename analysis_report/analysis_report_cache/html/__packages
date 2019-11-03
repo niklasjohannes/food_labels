@@ -23,3 +23,5 @@ purrr
 dplyr
 stringr
 forcats
+emmeans
+lsmeans
