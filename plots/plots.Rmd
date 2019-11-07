@@ -1,0 +1,602 @@
+---
+title: "Plots"
+author: "Niklas Johannes"
+date: "2019-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE,
+                      cache = TRUE)
+```
+
+In this file, I produce the graphs for the analysis section.
+I start with loading the libraries we need, plus functions.
+
+Note: To get the same font for the graphs, you will probably need to call the `font_import` command from the `extrafont` package. 
+```{r load_libraries}
+# pacman makes it easier to load and install packages
+if (!requireNamespace("pacman"))
+  install.packages("pacman")
+
+library(pacman)
+
+p_load(
+  Rmisc,
+  tidyverse,
+  here,
+  cowplot,
+  effects,
+  extrafont
+)
+
+loadfonts(device = "win")
+
+set.seed(42)
+
+options(contrasts = c("contr.sum", "contr.poly"))
+```
+
+```{r functions}
+### FUNCTION 1 ###
+# raincloud plot function from https://github.com/RainCloudPlots/RainCloudPlots/blob/master/tutorial_R/R_rainclouds.R
+# Defining the geom_flat_violin function ----
+# Note: the below code modifies the
+# existing github page by removing a parenthesis in line 50
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @export
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        group_by(group) %>%
+        mutate(
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+
+    draw_group = function(data, panel_scales, coord) {
+      # Find the points for the line to go all the way around
+      data <- transform(data,
+        xminv = x,
+        xmaxv = x + violinwidth * (xmax - x)
+      )
+
+      # Make sure it's sorted properly to draw the outline
+      newdata <- rbind(
+        plyr::arrange(transform(data, x = xminv), y),
+        plyr::arrange(transform(data, x = xmaxv), -y)
+      )
+
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1, ])
+
+      ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+
+    draw_key = draw_key_polygon,
+
+    default_aes = aes(
+      weight = 1, colour = "grey20", fill = "white", size = 0.5,
+      alpha = NA, linetype = "solid"
+    ),
+
+    required_aes = c("x", "y")
+  )
+
+### FUNCTION 2###
+# this function gets effects from mixed effects models and plots them
+
+# helper function that get the effects at 5000 values of the predictor and turns them into a tibble
+get_effects <-
+  function(
+    interaction_term,
+    lmer_model,
+    n_levels,
+    factor_to_recode
+  ) {
+    
+    # get estimates
+    estimates <- 
+      effect(
+        interaction_term,
+        lmer_model,
+        xlevels = n_levels
+      )
+    
+    # turn estimates into a tibble, so I can access them with ggplot later
+    effects_tibble <-
+      as_tibble(estimates)
+    
+    if( # recode depending on which grouping factor
+      factor_to_recode == "food_type"
+    ){
+      effects_tibble <-
+        effects_tibble %>% 
+        mutate( # recode values for the legend later
+        food_type = recode(
+          food_type,
+          "plant_based" = "Plant-based",
+          "meat_based" = "Meat-based"
+        )
+      )
+    }
+    
+    else{
+      effects_tibble <-
+        effects_tibble %>% 
+        mutate( # recode values for the legend later
+        label_type = recode(
+          label_type,
+          "control" = "Control",
+          "enhanced" = "Enhanced"
+        )
+      )
+    }
+      
+    
+    return(effects_tibble)
+  }
+
+# helper function that combines the effects tibbles from the models for attractiveness and simulations, so that I can facet wrap later
+merge_effects <-
+  function(
+    attr_dat,
+    sim_dat
+  ){
+    
+    # add identifier for outcomes
+    attr_dat <-
+      attr_dat %>% 
+      mutate(
+        measure = "Attractiveness"
+      )
+    
+    sim_dat <-
+      sim_dat %>% 
+      mutate(
+        measure = "Simulations"
+      )
+    
+    full_dat <- 
+      full_join(
+        attr_dat,
+        sim_dat
+      )
+    
+    return(full_dat)
+  }
+
+# plot function for line plots
+interaction_plot <-
+  function(
+    dat,
+    predictor,
+    outcome,
+    group_by,
+    y_lab,
+    x_lab,
+    legend_title,
+    facet_by
+  ){
+    line_plot <-
+    ggplot(
+      dat, 
+      aes_string(
+        x = predictor, # continuous predictor
+        y = outcome, # the fitted outcome
+        color = group_by,
+        fill = group_by
+        )
+      ) +
+      geom_line() + # fit a line, which should be linear because we have 5000 data points
+      geom_ribbon( # create the CI around the line from the upper and lower CI in the effects tibble
+        aes(
+          ymin = lower,
+          ymax = upper,
+          color = NA # remove borders
+        ),
+        alpha = 0.2
+      ) +
+      ylim(c(0, 100)) +
+      ylab(y_lab) +
+      xlab(x_lab) +
+      labs(color = legend_title,
+           fill = legend_title) + # otherwise I get two legends)
+      theme_cowplot() +
+      scale_color_brewer(palette = "Set2") +
+      scale_fill_brewer(palette = "Set2") +
+      theme(
+        text = element_text(
+          family="Century Gothic", # change font
+          size = 40
+        ),
+        strip.background.x = element_blank(),
+        axis.text.x = element_text(
+          size = 30
+        ),
+        legend.title = element_text(
+          size = 30
+        ),
+        legend.text = element_text(
+          size = 30
+        )
+      ) +
+      facet_wrap(~ measure)
+  }
+```
+
+# 1. Load and prepare data
+
+Next, I load the final data files.
+I saved those at the end of the analysis report (`analysis_report.Rmd`).
+```{r get_data}
+dat <- read_csv(here("data", "analysis_file.csv"))
+attractiveness <- read_csv(here("data", "attractiveness.csv"))
+simulations <- read_csv(here("data", "simulations.csv"))
+
+# reintroduce factors
+dat <- 
+  dat %>% 
+  mutate_at(
+    vars(pp, measure, food_type, label_type),
+    list(~ as.factor(.))
+  )
+```
+
+Now on to producing the 2x2 raincloud plot.
+To get the points (aka the rain) to fall left of the x-axis mark, the authors recommend to recode the factor on the x-axis to numbers, and then use that number to "move" the points.
+```{r}
+dat <-
+  dat %>% 
+  mutate(
+    label_type_n = if_else(label_type == "control", 1, 2),
+    label_type_n = as.factor(label_type_n)
+  )
+```
+
+For means with 95%CI, I also need the summary statistics with within-subject standard errors.
+I'll get those with the `Rmisc` package.
+Note that I aggregate per participant first to make the CIs comparable to a repeated-measures ANOVA.
+```{r get_summary}
+# aggregate first
+aggregated <- 
+  dat %>% 
+  group_by(pp, label_type, food_type, measure) %>% 
+  summarize(
+    rating = mean(rating, na.rm = TRUE)
+  )
+
+# then get summary stats
+summary_stats <- summarySEwithin(
+  data = aggregated,
+  measurevar = "rating",
+  withinvars = c("label_type", "food_type", "measure"),
+  idvar = "pp") %>% 
+    mutate( # add the same variable as above
+      label_type_n = if_else(label_type == "control", 1, 2),
+      food_type = recode( # purely cosmetic so that ggplot displays the levels with capital letters
+        food_type,
+        "plant_based" = "Plant-based",
+        "meat_based" = "Meat-based"
+      ),
+      measure = recode(
+        measure,
+        "attractiveness" = "Attractiveness",
+        "simulations" = "Simulations"
+      )
+    )
+```
+
+# 2. Raincloud plot
+
+Next, the raincloud plot.
+I followed [this](https://peerj.com/preprints/27137v1/) tutorial paper.
+```{r make_it_rain}
+rc_plot <-
+  ggplot(
+    dat %>% 
+      mutate(
+        food_type = recode( # rename factor levels
+          food_type,
+          "plant_based" = "Plant-based",
+          "meat_based" = "Meat-based"
+        ),
+        measure = recode(
+          measure,
+          "attractiveness" = "Attractiveness",
+          "simulations" = "Simulations"
+        )
+      ),
+    aes(
+      x = label_type_n,
+      y = rating,
+      fill = food_type,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = 0.05, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(label_type_n)-.2, # transfer the factor to number so that I can move the rain to the left with the -.2
+                 color = food_type,
+                 y = rating),
+             position = position_jitter(width = .15),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = summary_stats,
+    aes(
+      x = as.numeric(label_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = rating,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = summary_stats,
+    aes(
+      x = as.numeric(label_type_n)-.25,
+      y = rating,
+      ymin = rating - 2,
+      ymax = rating + 2,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    width = 0.02,
+    size = 0.8
+  ) +
+  geom_line( # line connecting the means per group
+    data = summary_stats,
+    aes(
+      x = as.numeric(label_type_n),
+      y = rating,
+      group = food_type,
+      color = food_type
+    ),
+    linetype = 1,
+    size = 1.1
+  ) +
+  ylim(c(0,100)) +
+  ylab("Rating") +
+  xlab("Label Type") +
+  labs(fill = "Food Type", # otherwise I get two legends
+       color = "Food Type") +
+  scale_x_discrete(labels = c('Control','Enhanced')) + # rename the x axis after transforming it to numeric earlier
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic", # change font
+      size = 40
+    ), 
+    strip.background.x = element_blank(),
+    axis.text.x = element_text(
+      size = 30
+    ),
+    legend.title = element_text(
+      size = 30
+    ),
+    legend.text = element_text(
+      size = 30
+    )
+  ) + 
+  facet_grid(. ~ measure)
+
+rc_plot
+```
+
+# 3. Interaction plots
+
+Next, I plot the interactions between categorical and numerical variables.
+Contrary to the raincloud plots, where I plotted the raw data, the interaction plots are meant to illustrate the simple slope analyses.
+When plotting the raw data with a fitted line, this line will be fitted with `lm`.
+Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted.
+```{r interaction_plots_simple}
+# with simple slope and lm method (without SEs, because they'd be wrong)
+ggplot(dat %>% 
+         filter(measure == "attractiveness"),
+       aes(
+         x = change_diet, 
+         y = rating,
+         color = label_type
+        )
+      ) + 
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+    ) + 
+  geom_point(alpha = 0.2) + 
+  ylim(0, 100) +
+  scale_color_brewer(palette = "Set2") +
+  theme_cowplot()
+```
+
+Therefore, I will fit the model-based means and the CIs based on the model-estimated SEs.
+
+As far as I know, there's no agreed-upon way to do this.
+The `effects` package has a built-in graph that models the fitted outcome for different levels of the predictor, including model-based SEs.
+
+I prefer to use `ggplot2`, so I'll get 5000 values of the predictor plus their fit and store them as a tibble.
+Got the idea from [here](https://www.r-bloggers.com/plotting-mixed-effects-model-results-with-effects-package/).
+I wrote all these steps into functions, see beginning of the script.
+
+To get the estimates from the models, I first need to import the models that I saved at the end of the analysis report.
+```{r interaction_model_mixed_effects}
+# get models
+load(here("plots", "models", "models.RData"))
+
+# the plot with the effects package
+plot(
+  effect("change_diet_s:food_type", 
+         h4_attr),
+         ci.style = "bands",
+  multiline = TRUE)
+```
+
+
+Plots for the interaction of intention to reduce eating meat and food type.
+```{r change_diet_food_type_interaction}
+# get the data set
+h4_effects <- merge_effects(
+  get_effects(
+    "change_diet_s:food_type",
+    h4_attr,
+    5000,
+    "food_type"
+  ),
+  get_effects(
+    "change_diet_s:food_type",
+    h4_sim,
+    5000,
+    "food_type"
+  )
+)
+
+# plot data
+h4_plot <-
+  interaction_plot(
+    h4_effects,
+    "change_diet_s",
+    "fit",
+    "food_type",
+    "Rating",
+    "Intention to Reduce Eating Meat",
+    "Food Type",
+    "measure"
+    )
+
+h4_plot
+```
+
+Plots for the interaction of frequency of eating meat and food type.
+```{r meat_frequency_food_type_interaction}
+# get the data set
+exp_meat_effects <- merge_effects(
+  get_effects(
+    "meat_per_week_s:food_type",
+    exp_attr_meat,
+    5000,
+    "food_type"
+  ),
+  get_effects(
+    "meat_per_week_s:food_type",
+    exp_sim_meat,
+    5000,
+    "food_type"
+  )
+)
+
+# plot data
+exp_meat_plot <-
+  interaction_plot(
+    exp_meat_effects,
+    "meat_per_week_s",
+    "fit",
+    "food_type",
+    "Rating",
+    "Frequency of Eating Meat",
+    "Food Type",
+    "measure"
+    )
+
+exp_meat_plot
+```
+
+Plots for the interaction of frequency of eating meat and label type for plant-based foods.
+```{r meat_frequency_label_type_interaction}
+# get the data set
+exp_meat_label_effects <- merge_effects(
+  get_effects(
+    "meat_per_week_s:label_type",
+    exp_attr_meat_labels,
+    5000,
+    "label_type"
+  ),
+  get_effects(
+    "meat_per_week_s:label_type",
+    exp_sim_meat_labels,
+    5000,
+    "label_type"
+  )
+)
+
+# plot data
+exp_meat_label_plot <-
+  interaction_plot(
+    exp_meat_label_effects,
+    "meat_per_week_s",
+    "fit",
+    "label_type",
+    "Rating",
+    "Frequency of Eating Meat",
+    "Label Type",
+    "measure"
+    )
+
+exp_meat_label_plot
+```
+
+# 4. Save plots
+```{r save_plots, eval=F}
+# raincloud
+tiff(here("plots", "raincloud.tiff"), width = 1732, height = 1266, units = "px", res = 300)
+rc_plot
+dev.off()
+
+# first interaction plot: H4
+tiff(here("plots", "h4_plot.tiff"), width = 1732, height = 1266, units = "px", res = 300)
+h4_plot
+dev.off()
+
+# exploratory plot 1
+tiff(here("plots", "frequency_meat_food_types.tiff"), width = 1732, height = 1266, units = "px", res = 300)
+exp_meat_plot
+dev.off()
+
+# exploratory plot 2
+tiff(here("plots", "frequency_meat_food_labels.tiff"), width = 1732, height = 1266, units = "px", res = 300)
+exp_meat_label_plot
+dev.off()
+```
+

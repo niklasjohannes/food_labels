@@ -43,6 +43,7 @@ p_load(
   lme4,
   afex,
   lsmeans,
+  MuMIn,
   tidyverse
 )
 
@@ -1133,12 +1134,25 @@ rc_plot(
   "Raincloud Plot of Food Attractiveness Ratings"
   )
 
+# raw means and SDs (without taking grouping by PP into account)
 working_file %>% 
   filter(measure == "attractiveness") %>% 
   group_by(label_type) %>% 
   summarize(
     mean = mean(rating, na.rm = TRUE),
     sd = sd(rating, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
   )
 ```
 
@@ -1224,12 +1238,25 @@ rc_plot(
   "Raincloud Plot of Food Simulations Ratings"
   )
 
+# raw means and SDs
 working_file %>% 
   filter(measure == "simulations") %>% 
   group_by(label_type) %>% 
   summarize(
     mean = mean(rating, na.rm = TRUE),
     sd = sd(rating, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
   )
 ```
 
@@ -1455,7 +1482,10 @@ h1_sim_p <-
   )
 
 # what is it
-summary(h1_sim_p)
+anova(h1_sim_p)
+
+# approximate effect size
+r.squaredGLMM(h1_sim)
 ```
 
 #### 4.1.1.2 Attractiveness
@@ -1527,7 +1557,10 @@ h1_attr_p <-
   )
 
 # what is it
-anova(h1_attr_p) 
+anova(h1_attr_p)
+
+# approximate effect size
+r.squaredGLMM(h1_attr)
 ```
 
 ### 4.1.2 Exploratory
@@ -1546,7 +1579,7 @@ I tried all current best practices:
 * different contrasts
 
 In the end, only simplifying the model worked (aka removing the intercept for `food`).
-Under this condition, the model remained significant.
+Under this condition, the effect remained significant.
 For attractiveness, the model converges and shows to be robust to the inclusion of those cases.
 ```{r h1_high_rsi}
 # get p-value for simulations
@@ -1654,6 +1687,9 @@ Because they are continuous, I'll grand-mean center them to make it easier to in
 Apparently, attitudes toward plant-based/vegan food has a positive association with simulations, whereas frequency of eating meat has a negative association, regardless of label type.
 However, none of these associations are significant.
 The effect of label type is robust to the inclusion of these covariates.
+
+In contrast, attitude has a positive, significant association with attractiveness.
+The effect of label type remains significant.
 ```{r h1_covariates}
 simulations <-
   simulations %>% 
@@ -1668,6 +1704,12 @@ attractiveness <-
     vars(attitude_pb_vegan, meat_per_week),
     list(c = ~ scale(., center = TRUE, scale = FALSE))
   )
+
+# get descriptives
+describe_visualize(attractiveness, 
+                   attitude_pb_vegan,
+                   FALSE,
+                   TRUE)
 
 # fit model
 h1_sim_covariates_p <-
@@ -1685,7 +1727,25 @@ h1_sim_covariates_p <-
   )
 
 # what is it
-summary(h1_sim_covariates_p)
+anova(h1_sim_covariates_p)
+
+# fit model
+h1_attr_covariates_p <-
+  mixed(
+    rating ~
+    label_type +
+    attitude_pb_vegan_c +
+    meat_per_week_c +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    attractiveness,
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_attr_covariates_p)
 ```
 
 ## 4.2 H2: Interaction effect
@@ -1820,6 +1880,8 @@ plot(h2_sim, type = c('p', 'smooth'))
 
 Unsurprisingly, we find two significant main effects, but no interaction: enhanced labels lead to more simulations; meat-based foods lead to more simulations; but the effect of label does not differ for food types.
 ```{r h2_sim_pvalue}
+options(contrasts = c("contr.sum", "contr.poly"))
+
 # get p-value
 h2_sim_p <-
   mixed(
@@ -1834,6 +1896,9 @@ h2_sim_p <-
 
 # what is it
 anova(h2_sim_p)
+
+# effect size approximation
+r.squaredGLMM(h2_sim)
 ```
 
 #### 4.2.1.2 Attractiveness
@@ -1855,7 +1920,7 @@ h2_attr <-
     attractiveness
   )
 
-summary(h2_sim)
+summary(h2_attr)
 ```
 
 Increasing the number of iterations still yields a warning.
@@ -1961,6 +2026,9 @@ h2_attr_p <-
 
 # what is it
 anova(h2_attr_p)
+
+# approximate effect size
+r.squaredGLMM(h2_attr)
 ```
 
 ### 4.2.2 Exploratory
@@ -2058,7 +2126,7 @@ The preregistered hypothesis reads as follows:
 ### 4.3.1 Confirmatory
 
 Currently, the working file follows tidyverse conventions, with one observation per row.
-That means, each participant has two rows per trials, one for their rating on simulations, one for their rating on attractiveness.
+That means each participant has two rows per trials, one for their rating on simulations, one for their rating on attractiveness.
 The variables `measure` shows to what measure the `rating` belongs.
 
 To predict attractiveness from simulations, the ratings need to be on the same row, meaning a separate rating variable for both measures.
@@ -2270,7 +2338,10 @@ h3_main_p <-
   )
 
 # what is it
-anova(h3_main_p) 
+summary(h3_main_p)
+
+# approximate effect size
+r.squaredGLMM(h3_main)
 ```
 
 ### 4.3.2 Exploratory
@@ -2376,7 +2447,7 @@ anova(h3_interaction_label_type)
 ```
 
 For food type, the plot shows the two main effects, but no interaction.
-This is backed up
+This is backed up by the model.
 ```{r h3_interaction_food_types}
 # plot the interaction
 ggplot(wide_data,
@@ -2402,8 +2473,8 @@ h3_interaction_food_type <-
     method = "S"
   )
 
-summary(h3_interaction_label_type)
-anova(h3_interaction_label_type)
+summary(h3_interaction_food_type)
+anova(h3_interaction_food_type)
 ```
 
 ## H4: Intention to reduce meat
@@ -2436,6 +2507,9 @@ ggplot(attractiveness,
       )+ 
   geom_smooth(method = "lm", aes(color = food_type)) + 
   ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
 
 # construct model
 h4_attr <- lme4::lmer(
@@ -2506,7 +2580,7 @@ h4_attr_p <- mixed(
   control = lmerControl(optimizer = "bobyqa")
 )
 
-anova(h4_attr_p)
+summary(h4_attr_p)
 
 # simple slopes
 emtrends(
@@ -2514,6 +2588,9 @@ emtrends(
   pairwise ~ food_type,
   var = "change_diet_s"
 )
+
+# get approximate effect size
+r.squaredGLMM(h4_attr)
 ```
 
 #### 4.1.2 Simulations
@@ -2538,7 +2615,7 @@ ggplot(simulations,
   ylim(0, 100)
 
 # set contrasts
-options(contrasts = c("contr.treatment", "contr.poly"))
+options(contrasts = c("contr.sum", "contr.poly"))
 
 # construct model
 h4_sim <- lme4::lmer(
@@ -2616,12 +2693,15 @@ emtrends(
   pairwise ~ food_type,
   var = "change_diet_s"
 )
+
+# get approximate effect size
+r.squaredGLMM(h4_sim)
 ```
 
 ### 4.2 Exploratory
 
 Just as before, I check whether the inclusion of those with a high RSI change anything about the results.
-The results don't change for attractiveness, but forfor simulations the main effect of the intention to reduce eating meat is not significant anymore.
+The results don't change for attractiveness, but for simulations the main effect of the intention to reduce eating meat is not significant anymore.
 ```{r h4_high_rsi}
 # get p-value for attractiveness
 h4_attr_p_rsi <-
@@ -2699,6 +2779,253 @@ h4_sim_no_outliers <- mixed(
 )
 
 anova(h4_sim_no_outliers)
+```
+
+## 4.2 Further exploratory tests
+
+Out of interest, I'd like to see the interaction in H4 with meat eating frequency.
+```{r expl_attr_meat_eating_frequency}
+# standardize the predictor
+attractiveness <-
+  attractiveness %>% 
+  mutate(
+    meat_per_week_s = scale(meat_per_week, scale = TRUE)
+  )
+
+# plot
+ggplot(attractiveness,
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_attr_meat <- lme4::lmer(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness)
+
+summary(exp_attr_meat)
+
+# get p-value
+exp_attr_meat_p <- mixed(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness,
+  type = 3,
+  method = "S")
+
+anova(exp_attr_meat_p)
+
+# simple slopes
+emtrends(
+  exp_attr_meat_p,
+  pairwise ~ food_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_attr_meat)
+```
+
+The same for simulations.
+```{r expl_sim_meat_eating_frequency}
+# standardize the predictor
+simulations <-
+  simulations %>% 
+  mutate(
+    meat_per_week_s = scale(meat_per_week, scale = TRUE)
+  )
+
+# plot
+ggplot(simulations,
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_sim_meat <- lme4::lmer(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations)
+
+summary(exp_sim_meat)
+
+# get p-value
+exp_sim_meat_p <- mixed(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations,
+  type = 3,
+  method = "S")
+
+anova(exp_sim_meat_p)
+
+# simple slopes
+emtrends(
+  exp_sim_meat_p,
+  pairwise ~ food_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_sim_meat)
+```
+
+Another interest: Do labels help frequent meat eaters in finding plant-based foods more attractive?
+Specifically, do enhanced labels reduce the association between frequency of eating meat and simulations/attractiveness (only plant-based).
+
+I check that with attractiveness first.
+Indeed, the more meat people eat, the less they find plant-based foods attractive, but less so for enhanced food labels.
+```{r expl_attr_meat_eating_labels}
+# plot
+ggplot(attractiveness %>% 
+         filter(food_type == "plant_based"),
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = label_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_attr_meat_labels <- lme4::lmer(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  attractiveness %>% 
+    filter(food_type == "plant_based"))
+
+summary(exp_attr_meat_labels)
+
+# get p-value
+exp_attr_meat_labels_p <- mixed(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  attractiveness %>% 
+    filter(food_type == "plant_based"),
+  type = 3,
+  method = "S")
+
+anova(exp_attr_meat_labels_p)
+
+# simple slopes
+emtrends(
+  exp_attr_meat_labels_p,
+  pairwise ~ label_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_attr_meat_labels)
+```
+
+The pattern looks similar for simulations, but the interaction is not significant.
+```{r expl_sim_meat_eating_labels}
+# plot
+ggplot(simulations %>% 
+         filter(food_type == "plant_based"),
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = label_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_sim_meat_labels <- lme4::lmer(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations %>% 
+    filter(food_type == "plant_based"),
+  control = lmerControl(optimizer = "bobyqa"))
+
+summary(exp_sim_meat_labels)
+
+# get p-value
+exp_sim_meat_labels_p <- mixed(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations %>% 
+    filter(food_type == "plant_based"),
+  type = 3,
+  method = "S",
+  control = lmerControl(optimizer = "bobyqa"))
+
+anova(exp_sim_meat_labels_p)
+
+# simple slopes
+emtrends(
+  exp_sim_meat_labels_p,
+  pairwise ~ label_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_sim_meat_labels)
+```
+
+# 5. Write final files
+
+Last, I write the final analysis files.
+I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
+```{r write_final_files}
+# save models
+save(
+  h4_attr, 
+  h4_sim, 
+  exp_attr_meat, 
+  exp_sim_meat, 
+  exp_attr_meat_labels, 
+  exp_sim_meat_labels, 
+  file = here("plots", "models", "models.RData")
+)
+
+# final file
+write_csv(working_file, here("data", "analysis_file.csv"))
+
+# attractiveness only
+write_csv(attractiveness, here("data", "attractiveness.csv"))
+
+# simulations only
+write_csv(simulations, here("data", "simulations.csv"))
+
 ```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
