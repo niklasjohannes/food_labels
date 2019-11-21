@@ -1,0 +1,3031 @@
+---
+title: "Data Analysis Report Study 2"
+author: "Niklas Johannes"
+date: "10/2/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: default
+    highlight: default
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE,
+                      cache = TRUE)
+```
+
+This file explains all data processing and analysis steps for [Project Title].
+The RProject has a private library in order to make all steps computationally reproducible.
+I use the `renv` package for this.
+That means you will need to install the package and run the `renv::restore` command, see instructions [here](https://github.com/rstudio/renv).
+```{r load_libraries}
+# pacman makes it easier to load and install packages
+if (!requireNamespace("pacman"))
+  install.packages("pacman")
+
+library(pacman)
+
+# load packages
+p_load(
+  knitr,
+  MASS,
+  Matrix,
+  mgcv,
+  Rmisc,
+  here,
+  DT,
+  cowplot,
+  pastecs,
+  lme4,
+  afex,
+  lsmeans,
+  MuMIn,
+  tidyverse
+)
+
+# set seed
+set.seed(42)
+
+# set theme for ggplot
+theme_set(theme_cowplot())
+```
+
+Below the custom functions I'll be using throughout the script.
+```{r functions}
+### FUNCTION 1 ###
+# function that transforms feet and inches to cm
+feet_inches_to_cm <- 
+  function(feet, inches){
+    feet_to_cm <- feet * 30.48
+    inches_to_cm <- inches * 2.54
+    cm <- feet_to_cm + inches_to_cm
+    cm <- round(cm, digits = 0)
+    
+    return(cm)
+  }
+
+### FUNCTION 2 ###
+# function that transforms stones and pounds to kg
+stones_pounds_to_kg <-
+  function(pounds, stones=NULL){
+    if(missing(stones)){
+      pounds_to_kg <- pounds * 0.453592
+      kg <- pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+    else{
+      stones_to_kg <- stones * 6.35029
+      pounds_to_kg <- pounds * 0.453592
+      kg <- stones_to_kg + pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+  }
+
+### FUNCTION 3 ###
+# function that gives summary statistics and a densityplot, with different levels of repeated vs. trait-like measures
+describe_visualize <- 
+  function(df, 
+           variable, 
+           repeated_measure = FALSE,
+           want_summary = FALSE){
+    
+    variable <- enquo(variable)
+    
+    # specifies whether the variable we want to plot is a trait-like or repeated measure
+    if (repeated_measure == FALSE){
+      df <-
+        df %>%
+        group_by(pp) %>%
+        slice(1) %>% 
+        ungroup()
+    } else {
+      df <-
+        df
+    }
+    
+    # descriptive stats
+    sum_stats <-
+      df %>% 
+      pull(!! variable) %>% 
+      stat.desc()
+    
+    # plot
+    plot <-
+      ggplot(df, aes(x = !! variable)) +
+        geom_density(color = "darkgrey", fill = "darkgrey") +
+        geom_point(aes(x = !! variable, y = 0))
+    
+    # return the two (if both are wanted)
+    if(want_summary == TRUE){
+      return(list(kable(sum_stats), plot))
+    } else{
+      return(plot)
+    }
+  }
+
+### FUNCTION 4 ###
+# function that returns a table for trait-like categorical variables
+my_table <-
+  function(df, variable){
+    variable <- enquo(variable)
+    
+    df %>% 
+      group_by(pp) %>% 
+      slice(1) %>% 
+      pull(!! variable) %>% 
+      table()
+  }
+
+### FUNCTION 5 ###
+# raincloud plot function from https://github.com/RainCloudPlots/RainCloudPlots/blob/master/tutorial_R/R_rainclouds.R
+# Defining the geom_flat_violin function ----
+# Note: the below code modifies the
+# existing github page by removing a parenthesis in line 50
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @export
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        group_by(group) %>%
+        mutate(
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+
+    draw_group = function(data, panel_scales, coord) {
+      # Find the points for the line to go all the way around
+      data <- transform(data,
+        xminv = x,
+        xmaxv = x + violinwidth * (xmax - x)
+      )
+
+      # Make sure it's sorted properly to draw the outline
+      newdata <- rbind(
+        plyr::arrange(transform(data, x = xminv), y),
+        plyr::arrange(transform(data, x = xmaxv), -y)
+      )
+
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1, ])
+
+      ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+
+    draw_key = draw_key_polygon,
+
+    default_aes = aes(
+      weight = 1, colour = "grey20", fill = "white", size = 0.5,
+      alpha = NA, linetype = "solid"
+    ),
+
+    required_aes = c("x", "y")
+  )
+
+### FUNCTION 6 ###
+# creates raincloud plots
+rc_plot <-
+  function(
+    df,
+    measurement,
+    variable,
+    group,
+    xlab,
+    title,
+    facet = NULL
+  ) {
+    rc_plot <-
+    ggplot(
+      df %>%
+        filter(measure == measurement),
+      aes_string(
+        x = group,
+        y = variable,
+        fill = group,
+        color = group
+      )
+    ) +
+      geom_flat_violin(position = position_nudge(x = .2,
+                                                 y = 0),
+                       adjust = 2) +
+      geom_point(position = position_jitter(width = .15),
+                 size = .10) +
+      ylab("Rating (0-100)") +
+      xlab(xlab) +
+      coord_flip() +
+      guides(fill = FALSE,
+             color = FALSE) +
+      scale_color_brewer(palette = "Dark2") +
+      scale_fill_brewer(palette = "Dark2") +
+      ggtitle(title)
+    
+    if(!is.null(facet)){
+      rc_plot <-
+      rc_plot +
+        facet_wrap(facet)
+    }
+    
+    return(rc_plot)
+  }
+
+### FUNCTION 6 ###
+# creates line plots
+line_plot <-
+  function(
+    df,
+    x_group,
+    measure,
+    group_by
+  ) {
+    
+    measure <- enquo(measure)
+    
+    ggplot(df,
+           aes_string(
+             x = x_group,
+             y = measure,
+             group = group_by,
+             color = group_by,
+             linetype = group_by
+           )
+    ) +
+      geom_line() +
+      geom_point() +
+      geom_errorbar(
+        aes(
+          ymin = !! measure - se,
+          ymax = !! measure + se),
+        width = .05) +
+      scale_color_brewer(palette = "Dark2")
+  }
+
+### FUNCTION 7 ###
+# function that calculates proportion of residuals above a cut-off for an lmer object
+proportion_residuals <-
+  function(model, cut_off){
+    
+    # scale the model residuals
+    model_resid <- resid(model, scaled = TRUE)
+    
+    # take the absolute
+    model_resid <- abs(model_resid)
+    
+    # select those below cut_off and divide by total number of residuals
+    proportion <- sum(model_resid > cut_off) / length(model_resid)
+    
+    return(proportion)
+  }
+
+### FUNCTION 8 ###
+# shows the proportions from the above function in a table
+lmer_residuals <-
+  function(lmer_model){
+    
+    # proportion of scaled residuals that +- 2, 2.5, and 3
+    residuals_2 <- proportion_residuals(lmer_model, 2)
+    residuals_25 <- proportion_residuals(lmer_model, 2.5)
+    residuals_3 <- proportion_residuals(lmer_model, 3)
+    
+    # put those percentages into a tibble, add whether they pass a cut-off, and produce nice table
+    resid_proportions <-
+      tibble(
+        standardized_cutoff = c(2, 2.5, 3),
+        proportion_cutoff = c(.05, .01, .0001),
+        proportion = c(
+          residuals_2,
+          residuals_25,
+          residuals_3
+        ),
+        below_cutoff = proportion < proportion_cutoff
+      )
+    
+    print(resid_proportions)
+  }
+
+### FUNCTION 8 ###
+# function takes the formal outlier values on cook's distance from an lmer project and arranges them from highest to lowest
+arrange_cook <-
+  function(outliers, grouping_factor){
+    cooks.distance(outliers) %>% 
+      as_tibble(rownames = as.character(grouping_factor)) %>%
+      rename(cooks_distance = V1) %>% 
+      arrange(desc(cooks_distance)) %>% 
+      head()
+  }
+```
+
+# 1. Load and wrangle data
+## 1.1 Load data
+First, we load the data.
+For a codebook, see the [enter file name] file.
+Note that the Qualtrics output format is quite the nightmare for importing; found a solution [here](https://stackoverflow.com/questions/50314805/how-to-import-qualtrics-data-in-csv-format-into-r).
+```{r load_data}
+headers <- read_csv(
+  here("data", "study2", "raw_data.csv"),
+  col_names = FALSE,
+  n_max = 1) %>%
+  as.character() # variable names stored in a vector
+
+raw_data <- read_csv(
+  here("data", "study2", "raw_data.csv"),
+  col_names = headers, # use that name vector here to name variables
+  na = "",
+  skip = 3 # those are the three rows that contain the variable info
+  )
+
+rm(headers) # clear names from workspace
+```
+
+The data frame is extremely wide; we have `r ncol(raw_data)` variables.
+This has several reasons:
+
+* Qualtrics data are generally in the wide format, so each stimulus gets a column rather than a row
+* What label type was assigned to which food type for attractiveness ratings was counterbalanced, such that there were two sets, each containing 40 variables (= 80 total)
+* Participants only answered one set, but both sets are contained in the data, meaning that participants will have entries for one set of variables, but only NA for the other set
+* Each stimulus was timed, meaning Qualtrics measured four additional variables per stimulus: first click, last click, number of clicks, and after how much time the page was submitted
+* This means in addition to the 80 stimulus variables, there are 80 (the two sets) x 4 (timing variables) = `r 80 * 4` variables just for attractiveness ratings (total `r 80 + 80 * 4` attractiveness variables)
+* This entire procedure also applies to simulation ratings, doubling the number of stimulus rating variables (`r 80 * 5 * 2` total rating variables)
+* The remaining `r ncol(raw_data) - 80 * 5 * 2` are demographic etc. variables
+
+## 1.2 Wrangling
+We need to get these data into the long format.
+Before that, let's only keep those variables we need and simultaneously give them proper names.
+Also, the `response_id` already is a unique identifier, but not easy to read.
+I'll add a participant number (`pp`).
+Last, because I'm cleaning the raw data, I'll use a new data object: `working_file`
+```{r select_and_rename}
+working_file <- 
+  raw_data %>% 
+  select(
+    start_date = StartDate,
+    end_date = EndDate,
+    duration = `Duration (in seconds)`,
+    finished = Finished,
+    response_id = ResponseId,
+    fullfil_criteria = Q3,
+    consent = Q8,
+    prolific_id = Q9,
+    group = Group,
+    hungry = Q11_1,
+    thirsty = Q11_2,
+    desire_instructions_time = `Q13_Page Submit`,
+    pb_1_c_attr_1:`mb_20_enh_attr_time_Click Count`, # all attractiveness variables
+    simulations_instructions_time = `Q41_Page Submit`,
+    pb_1_c_sim_1:`mb_20_enh_sim_time_Click Count`, # all simulation variables
+    age = Q19,
+    gender = Q20,
+    height_choice = Q21,
+    height_cm = Q22_1,
+    height_feet = Q23_1,
+    height_inches = Q23_2,
+    weight_choice = Q24,
+    weight_kilos = Q25_1,
+    weight_stones = Q26_1,
+    weight_pounds = Q26_2,
+    weight_pounds_only = Q27_1,
+    diet = Q28,
+    diet_details = Q29,
+    meat_per_week = Q30,
+    change_diet = Q31_1,
+    attitude_meat = attitude_meat_1,
+    attitude_vegan = attitude_vegan_1,
+    attitude_pb = attitude_pb_1,
+    allergies = Q32,
+    allergies_details = Q33,
+    language_issues = Q34,
+    language_issues_details = Q35,
+    didnt_like = Q36,
+    study_about = Q37,
+    technical_issues = Q38,
+    -contains("Click"), # omit click count variables
+  ) %>%
+  mutate(pp = paste0("pp_", row_number())) %>%
+  select(# add participant number and set it as first column
+    pp,
+    everything()
+  )
+```
+
+Next, I assign the correct variable type.
+In addition, I exported the Qualtrics data with numbers as output, so I will reintroduce the factor levels for factor variables.
+```{r change_types}
+working_file <-
+  working_file %>% 
+  mutate_at(
+    vars(
+      pp,
+      finished,
+      response_id:group,
+      gender,
+      height_choice,
+      weight_choice,
+      diet,
+      allergies,
+      language_issues
+    ),
+    list(~ as.factor(.))
+  ) %>% 
+  mutate(
+    finished = fct_recode(
+      finished,
+      no = "0",
+      yes = "1"
+    ),
+    gender = fct_recode(
+      gender,
+      male = "1",
+      female = "2",
+      other = "3"
+    ),
+    diet = fct_recode(
+      diet,
+      omnivore = "1",
+      pescatarian = "2",
+      vegetarian = "3",
+      vegan = "4",
+      other = "5"
+    ),
+    height_choice = fct_recode(
+      height_choice,
+      cm = "1",
+      feet_inches = "2"
+    ),
+    weight_choice = fct_recode(
+      weight_choice,
+      kg = "1",
+      stones_pounds = "2",
+      pounds_only = "3"
+    )
+  ) %>% 
+  mutate_at(
+    vars(
+      fullfil_criteria,
+      consent,
+      allergies,
+      language_issues
+    ),
+    list(
+      ~ fct_recode(
+        .,
+        yes = "1",
+        no = "2"
+      )
+    )
+  )
+```
+
+Upon inspection, I saw that meat eating frequency (`meat_per_week`) has two non-numerical entries: `1/2` and `less than once`.
+I don't want to remove the latter, so I'll convert both to a number (0.5).
+```{r recode meat_per_week}
+working_file <-
+  working_file %>%
+  mutate(
+    meat_per_week = case_when(
+      meat_per_week %in% c("1/2", "less than once") ~ 0.5,
+      TRUE ~ as.numeric(meat_per_week)
+    )
+  )
+```
+
+Similarly, there are text entries in `weight_kilos` and `weight_pounds`.
+In `weight_kilos` there's a text entry explaining that the respondent doesn't know their weight, so we'll set that to NA.
+In `weight_pounds`, the respondent indicated stones, but `"N/A"` for pounds, so we'll set that to 0, assuming the respondent weighed around the indicated weight in stones.
+We'll do the same for all those who only provided stones, but no pounds.
+```{r recode_weight}
+working_file <- 
+  working_file %>% 
+  mutate(
+    weight_kilos = as.numeric(
+      na_if(weight_kilos, "I don't lnow unfortuantely and I do not have acces to a set of scales qhilw filling out this survey. I applogise for this, but I was not informed I would need this prior to starting the survey.")
+    ),
+    weight_pounds = as.numeric(
+      na_if(weight_pounds, "N/A")
+    ),
+    weight_pounds = case_when(
+      weight_choice == "stones_pounds" & is.na(weight_pounds) ~ 0,
+      TRUE ~ weight_pounds
+    )
+  )
+```
+
+Because the study was conducted in the UK, we also need to transform height and weight to cm and kg, respectively.
+```{r transform_height_weight}
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = case_when(
+      height_choice == "cm" ~ height_cm,
+      height_choice == "feet_inches" ~ feet_inches_to_cm(height_feet, height_inches)
+    ),
+    weight_kilos = case_when(
+      weight_choice == "kg" ~ weight_kilos,
+      weight_choice == "stones_pounds" ~ stones_pounds_to_kg(weight_pounds, weight_stones),
+      weight_choice == "pounds_only" ~ stones_pounds_to_kg(weight_pounds_only) 
+    )
+  )
+```
+
+Now that the data are cleaned, I can finally transform them to the long format.
+Currently, the measurements of attractiveness and simulations are in the following format: **pb_1_c_attr_1**. The components (separated by underscores) of that format mean:
+
+* **food type**: pb (plant-based) or mb(meat-based)
+* **stimulus number**
+* **label type**: c (control) or enh (enhanced)
+* **measurement/DV**: attr (attractiveness) or sim (simulations)
+* meaningless Qualtrics appendix: always `_1`
+
+Let's remove the `_1` at the end of those variable names, and also remove all `Page Submit` appendices from their variable names.
+```{r remove_1}
+working_file <-
+  working_file %>% 
+  rename_at(
+    vars(
+      ends_with("_1"),
+    ),
+    list(
+      ~ str_sub(
+        ., 1, str_length(.)-2
+      )
+    )
+  ) %>% 
+  rename_at(
+    vars(
+      ends_with("Page Submit")
+    ),
+    list(
+      ~ str_replace(
+        ., "_Page Submit", ""
+      )
+    )
+  )
+```
+
+## 1.3 Tidy data
+Let's get to turning the data into the long format.
+Because we used two sets of stimuli (counterbalancing what stimulus belongs to what food type and label type), half of the participants gave responses to half of the measurement variables; the other half of participant gave responses to the other half.
+
+Therefore, participants will have missing values on those variables that belonged to the other set (i.e., the other counterbalancing condition).
+Luckily, the `pivot_longer` function is amazing, so we can drop those measurements per participants with the `values_drop_na` argument.
+This command has the nice side effect of also excluding those who did not consent to participate (because they have NAs everywhere.)
+```{r turn_long}
+working_file <- 
+  working_file %>% 
+  pivot_longer(
+    cols = c(contains("pb_"), contains("mb_")),
+    names_to = c( # specifict the variables to be formed from the current variable names
+      "food_type", 
+      "stimulus_no",
+      "label_type",
+      "measure"
+      ),
+    values_to = c( # the values, which will be measurement type (attractiveness vs. simulations) and the timer per variable
+      "rating", 
+      "time"
+      ),
+    names_sep = "_",
+    values_drop_na = TRUE # do not include empty entries due to counterbalancing as rows in the long format
+  ) %>%
+  
+  # give proper variable names, labels, and variable types
+  mutate(
+    stimulus_no = as.numeric(stimulus_no)
+  ) %>% 
+  mutate(
+    food_type = fct_recode(
+      as.factor(food_type),
+      meat_based = "mb",
+      plant_based = "pb",
+    ),
+    label_type = fct_recode(
+      as.factor(label_type),
+      control = "c",
+      enhanced = "enh"
+    ),
+    measure = fct_recode(
+      as.factor(measure),
+      attractiveness = "attr",
+      simulations = "sim"
+    )
+  ) %>% # arbitrary, but I like to order the variables roughly in the order they were collected
+  select(
+    pp:simulations_instructions_time,
+    food_type:time,
+    everything()
+  )
+```
+
+Alright, the data are in a tidy format.
+Below, I show the data of a random participant for illustration.
+```{r tidy_data, echo=FALSE}
+DT::datatable(
+  working_file %>% 
+    filter(pp == "pp_100"),
+  options = list(
+    autoWidth = TRUE,
+    scrollY = TRUE,
+    scrollX = TRUE, 
+    pageLength = 5
+  )
+  )
+```
+
+# 2. Exclusions
+
+## 2.1 Exclude test runs
+There are still a couple of test runs left (three in total).
+They can be identified because they do not follow the Prolific ID scheme (i.e., starting with a `5`, less than 20 characters).
+We exclude them here.
+```{r exclude_test_runs}
+# before excluding testruns
+length(unique(working_file$pp))
+
+working_file <- 
+  working_file %>% 
+  filter(
+    str_length(
+      as.character(prolific_id)
+      ) > 20
+    )
+
+# after exclusion
+length(unique(working_file$pp))
+```
+
+Now exclude those who didn't finish the survey.
+```{r exclude_nonfinished}
+length(unique(working_file$pp))
+
+working_file <-
+  working_file %>% 
+  filter(finished == "yes")
+
+length(unique(working_file$pp))
+```
+
+Out of experience, Qualtrics isn't very good at determining whether a survey is finished or not.
+We double check this:
+If indeed all participants gave all ratings, there should be 80 for each of the remaining `r length(unique((working_file$pp)))` participants: 40 attractiveness ratings and 40 simulations ratings.
+Furthermore, there should be few `NA`s remaining on any of the ratings.
+
+There are three cases where participants did not report a rating.
+I double checked that in the raw data file and that's indeed the case.
+Respondents were not forced to give a response (Qualtrics option was "Request Response"), so participants simply did not respond to those three items.
+```{r check_total_n}
+# does each participant have 80 ratings (i.e., rows)?
+working_file %>% 
+  group_by(pp) %>% 
+  count() %>%
+  ungroup() %>% 
+  summarize(
+    all_there = sum(n == 80)
+  )
+
+# compare to sample
+length(unique(working_file$pp))
+
+# are there NAs left on the rating or timing variable?
+working_file %>% 
+  select(rating, time) %>% 
+  summarize_all(
+    list(~ sum(is.na(.)))
+  )
+
+working_file %>% 
+  filter(is.na(rating)) %>% 
+  DT::datatable(
+  .,
+  options = list(
+    autoWidth = TRUE,
+    scrollY = TRUE,
+    scrollX = TRUE, 
+    pageLength = 3
+  )
+  )
+```
+
+## 2.3 Not fulfilling inclusion criteria
+There was a filter question at the beginning of the study asking participants whether they fulfill the inclusion criteria.
+All participants indicated they fulfilled the criteria, so no need to exclude anyone.
+```{r fulfill_inclusion}
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  pull(fullfil_criteria) %>% 
+  table()
+```
+
+
+## 2.3 Identify rushed responses
+In the preregistration, we specified data quality checks: if participants do not comply with the experimental instructions or give (almost) exactly the same response on each trial (i.e., within 1 of 100 scale points).
+
+To identify possibly rushed responses, we inspect the variation of ratings and compare those to the how quickly participants responded.
+
+The variation looks fine, nobody just clicked the same point of the scale repeatedly.
+One participant was extremely fast, spending about 1.5 seconds per rating, possibly hinting at randomly clicking through.
+```{r response_variation}
+# lowest variation of the ratings
+working_file %>% 
+  group_by(pp) %>% 
+  summarize(
+    mean = (mean(rating, na.rm = TRUE)),
+    sd = sd(rating, na.rm = TRUE)
+  ) %>% 
+  arrange(sd)
+
+# check response times
+time_means <-
+  working_file %>% 
+  group_by(pp) %>% 
+  summarize(
+    time_mean = mean(time)
+  ) %>% 
+  arrange(time_mean)
+
+# inspect the fastest times
+head(time_means, n = 10)
+
+# compare to median time
+median(working_file$time)
+
+# plot them
+time_means %>% 
+  ggplot(aes(x = time_mean)) +
+  geom_density(color = "darkgrey", fill = "darkgrey") +
+  geom_point(aes(x = time_mean, y = 0))
+```
+
+*Note: This is not preregistered.*
+It's pretty hard to tell what mean time on answering items indicates inattentiveness.
+However, we can at least set those mean times into relation with the sample median time.
+[Leiner](https://www.researchgate.net/profile/Dominik_Leiner/publication/258997762_Too_Fast_Too_Straight_Too_Weird_Post_Hoc_Identification_of_Meaningless_Data_in_Internet_Surveys/links/59e4596baca2724cbfe85921/Too-Fast-Too-Straight-Too-Weird-Post-Hoc-Identification-of-Meaningless-Data-in-Internet-Surveys.pdf) has put forward a useful way to identify meaningless data in internet studies, validated with real data.
+
+The method is relatively straightforward: The Relative Speed Index (RSI) gives an impression of how fast participants responded to items without giving too much weight to quick or slow responses on individual stimuli.
+An RSI of > 1.75 is considered an indicator of meaningless data (actually, it might even be conservative).
+
+The RSI is computed as follows:
+
+* Compute sample's median completion time for each page
+* Divide those sample completion times by the individual respondents' page completion time (i.e., speed factors)
+* Trim these speed factors to an interval of [0|3]
+* Average the trimmed speed factors per participant to obtain the RSI
+```{r cumpute_rsi}
+working_file <-
+  working_file %>% 
+  
+  # calculate median time for each stimulus (aka page)
+  group_by(
+    food_type,
+    stimulus_no,
+    label_type,
+    measure
+  ) %>% 
+  summarize(
+    page_time_median = median(time)
+  ) %>% 
+  
+  # add those median page times to the data set and match with the stimuli there
+  left_join(
+    working_file,
+    .,
+    by = c(
+      "food_type",
+      "stimulus_no",
+      "label_type",
+      "measure"
+    )
+  ) %>% 
+  
+  # now divide the median page completion time by the individual page completion time (so per row)
+  mutate(
+    speed_factor = page_time_median / time
+  ) %>% 
+  
+  # trim to [0|3]: dividing by zero will yield a speed factor of Inf, anything else a higher number
+  mutate(
+    speed_factor_trimmed = case_when(
+      speed_factor == Inf ~ 0,
+      speed_factor > 3 ~ 3,
+      TRUE ~ speed_factor
+    )
+  ) %>% 
+  
+  # average those trimmed speed factors to obtain RSI
+  group_by(pp) %>% 
+  mutate(
+    rsi = mean(speed_factor_trimmed)
+  ) %>% 
+  ungroup()
+```
+
+Let's inspect the RSI.
+Indeed, there is at least one massive outlier, and several RSIs > 1.75.
+If we inspect mean completion time side by side with RSI, we see that several of those participants we suspected rushed through also come up here.
+We thus exclude those participants with an RSI > 1.75.
+**Note: this decision was not preregistered, but we logged it in a decision log file.**
+
+I'll run the analyses with and without these `r length(unique((working_file$pp))) - nrow(working_file %>% filter(rsi <= 1.75) %>% group_by(pp) %>% slice(1))` cases, so I'll put their data into a separate object.
+```{r exclude_rsi}
+# let's plot them
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ggplot(aes(x = rsi)) +
+  geom_density() +
+  geom_point(aes(x = rsi, y = 0))
+
+# compare with raw mean time per page
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  arrange(desc(rsi)) %>%
+  select(pp, rsi) %>% 
+  left_join(., 
+            time_means,
+            by = "pp"
+  )
+
+# how many do we exclude?
+length(unique((working_file$pp))) - nrow(working_file %>% filter(rsi <= 1.75) %>% group_by(pp) %>% slice(1))
+
+# create a separate file for those cases that we add when we test the robustness of the analysis
+high_rsi <-
+  working_file %>% 
+  filter(rsi > 1.75)
+
+# remove them from working file
+working_file <-
+  working_file %>% 
+  filter(rsi <= 1.75)
+```
+
+# 3. Describe and visualize
+
+## 3.1 Meta-data
+How long did participants spend on the survey?
+Median duration is around ~ 14 minutes.
+```{r describe_duration}
+describe_visualize(
+  working_file,
+  duration,
+  FALSE,
+  TRUE
+)
+```
+
+How long did they spend on the instructions for the attractiveness and simulations, respectively?
+Overall not long (~ 10 seconds), but some apparently left the browser window open for quite some time.
+```{r describe_instructions}
+describe_visualize(
+  working_file,
+  desire_instructions_time,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  simulations_instructions_time,
+  FALSE,
+  TRUE
+)
+```
+
+Were there language issues?
+Barely, and the qualitative answers don't give cause for concern.
+```{r describe_language}
+my_table(working_file, language_issues)
+
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  filter(language_issues == "yes") %>% 
+  pull(language_issues_details)
+```
+
+## 3.2 Demographic information
+First, I look at hunger and thirst ratings.
+Participants seemed to be more thirsty than hungry.
+```{r describe_hunger_thirst}
+describe_visualize(
+  working_file,
+  hungry,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  thirsty,
+  FALSE,
+  TRUE
+)
+```
+
+What's the age range in our sample?
+One participant indicated to be `r working_file %>% pull(age) %>% max()` years old.
+Probably a typo, but not sure whether it's supposed to be 25 or 59, so I set that value to `NA`.
+```{r describe_age}
+describe_visualize(
+  working_file,
+  age,
+  FALSE,
+  TRUE
+)
+
+working_file <-
+  working_file %>% 
+  mutate(
+    age = if_else(age == 259, NA_real_, age)
+  )
+
+describe_visualize(
+  working_file,
+  age,
+  FALSE,
+  TRUE
+)
+```
+
+What is the gender distribution in our sample?
+```{r describe_gender}
+my_table(working_file, gender)
+```
+
+What's the height distribution?
+One participant appears to be giant.
+I think this is too unrealistic.
+We could think about whether that participant took the survey seriously, but the ratings and duration on instruction look good when inspecting the raw data.
+After setting that entry to missing, the rest looks pretty normal.
+```{r describe_height}
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = if_else(height_cm == 290, NA_real_, height_cm)
+  )
+
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+```
+
+Let's look at the weight.
+There's a couple of participants who indicated to weigh less than 20 kilos.
+I find that hard to believe and set their weight as missing.
+```{r describe_weight}
+describe_visualize(
+  working_file,
+  weight_kilos,
+  FALSE,
+  TRUE
+)
+
+working_file %>% 
+  filter(weight_kilos < 20) %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(pp, contains("weight"))
+
+working_file <-
+  working_file %>% 
+  mutate(
+    weight_kilos = if_else(weight_kilos < 20, NA_real_, weight_kilos)
+  )
+
+describe_visualize(
+  working_file,
+  weight_kilos,
+  FALSE,
+  TRUE
+)
+```
+
+Next, some information about their diet.
+
+* participants seem to be divided on whether they're trying to change their diet
+* frequent meat eaters
+* like meat better than vegan or plant-based foods
+```{r describe_diet}
+# diet
+my_table(working_file, diet)
+
+# how often they eat meat per week
+describe_visualize(
+  working_file,
+  meat_per_week,
+  FALSE,
+  TRUE
+)
+
+# to what extent participants are currently trying to change their diets
+describe_visualize(
+  working_file,
+  change_diet,
+  FALSE,
+  TRUE
+)
+
+# attitudes toward eating meat
+describe_visualize(
+  working_file,
+  attitude_meat,
+  FALSE,
+  TRUE
+)
+
+# attitudes toward vegan food
+describe_visualize(
+  working_file,
+  attitude_vegan,
+  FALSE,
+  TRUE
+)
+
+# attitude toward plant-based food
+describe_visualize(
+  working_file,
+  attitude_pb,
+  FALSE,
+  TRUE
+)
+
+# whether participants have food allergies
+my_table(working_file, allergies)
+```
+
+## 3.3 Ratings
+Next, I visualize the ratings on attractiveness and simulations, respectively.
+I'll first visualize and describe them overall, then per factor level (as in two main effects of label type and food type), and then the interaction.
+
+### 3.1 Attractiveness
+First, I inspect the overall attractiveness ratings, regardless of label or food type.
+```{r attr_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "attractiveness"),
+  rating,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with ratings per label type.
+Doesn't look like there's much of a difference.
+```{r describe_attr_label_type}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings"
+  )
+
+# raw means and SDs (without taking grouping by PP into account)
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Let's inspect the ratings per food type.
+People seem to like meat-based labels more.
+```{r describe_attr_food_type}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Attractiveness Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Next, I inspect the interaction of label type and food type for attractiveness ratings.
+The raincloud plots are not that easy to read (even if I add means with CIs), so for easier visualization I use a line plot on the aggregated means with within-subject standard error (from the `Rmisc::summarySEwithin` function).
+```{r describe_attr_interaction}
+rc_plot(
+  working_file,
+  "attractiveness",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_attr <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "attractiveness") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating = mean(rating, na.rm = TRUE)),
+    measurevar = "rating",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at means and SDs
+summary_attr
+
+# line graph
+line_plot(
+  summary_attr,
+  "label_type",
+  rating,
+  "food_type"
+)
+```
+
+### 3.2 Simulations
+First, I inspect the overall simulations ratings, regardless of label or food type.
+```{r simulations_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "simulations"),
+  rating,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with simulations ratings per label type.
+Doesn't look like there's much of a difference.
+```{r describe_sim_label_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Simulations Ratings"
+  )
+
+# raw means and SDs
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Let's inspect the ratings per food type.
+People seem to simulate more with meat-based labels.
+```{r describe_sim_food_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Simulations Ratings"
+  )
+
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating, na.rm = TRUE),
+    sd = sd(rating, na.rm = TRUE)
+  )
+```
+
+Next, I inspect the interaction of label type and food type for simulations ratings with rainclouds and line graphs.
+```{r describe_sim_interaction}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Attractiveness Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_sim <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "simulations") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating = mean(rating, na.rm = TRUE)),
+    measurevar = "rating",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at Ms and SDs
+summary_sim
+
+# line graph
+line_plot(
+  summary_sim,
+  "label_type",
+  rating,
+  "food_type"
+)
+```
+
+# 4. Analysis
+I now move to the actual analysis.
+I will structure the analysis section per hypothesis, and each hypothesis with a confirmatory/preregistered and an exploratory sub-section.
+I will note and explain deviations from the preregistrations wherever applicable.
+After the hypothesis sections, I'll also describe exploratory results.
+
+## 4.1 H1: Main effect of food label
+The preregistered hypothesis reads as follows:
+
+>Simulation and attractiveness will be higher for foods with enhanced compared to neutral labels.
+
+### 4.1.1 Confirmatory
+I'll start with confirmatory model. 
+Note that the preregistration was imprecise when saying that we will predict the outcome with food type and label type.
+It actually means controlling for food **item** as random effect.
+Thus, we specify a model with maximal effects.
+
+Before we can do that, we need to add the individual food item as a factor to the data set.
+As of now, we only have the food type plus a stimulus number, which together create 40 unique food items.
+I'll add them here; for a full description, see the OSM materials.
+```{r add_food_items}
+# file that contains the foods
+food_items <-
+  read_csv(
+    here("data", "study2", "food_items.csv"),
+    col_types = list(
+      col_factor(levels = NULL),
+      col_number(),
+      col_factor(levels = NULL)
+    )
+  )
+
+head(food_items, n = 5)
+
+working_file <-
+  working_file %>% 
+  left_join(
+    .,
+    food_items,
+    by = c("food_type",
+           "stimulus_no")
+  ) %>% 
+  select( # reorder columns
+    pp:stimulus_no,
+    food,
+    everything()
+  )
+
+# also add them to the file with participants who had a high RSI
+high_rsi <-
+  high_rsi %>% 
+  left_join(
+    .,
+    food_items,
+    by = c("food_type",
+           "stimulus_no")
+  ) %>% 
+  select( # reorder columns
+    pp:stimulus_no,
+    food,
+    everything()
+  )
+```
+
+Also, because there's two dependent variables in the data, I'll split the working file into two analysis files, one per measurement.
+```{r split_analysis_file}
+simulations <-
+  working_file %>% 
+  filter(measure == "simulations") %>% 
+  mutate(
+    measure = droplevels(measure)
+  )
+
+attractiveness <-
+  working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  mutate(
+    measure = droplevels(measure)
+  )
+```
+
+#### 4.1.1.1 Simulations
+Construct the main effects model: predict simulations by label type.
+Because we're only interested in the main effects, I'll use dummy coding for the predictor; we only have two levels and Type 2 or 3 Sums of Squares will be the same.
+The model converges without problems.
+```{r h1_sim_model}
+# set contrasts
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+# construct model
+h1_sim <- lme4::lmer(
+  rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations
+)
+
+# inspect model
+summary(h1_sim)
+```
+
+Now let's inspect model diagnostics.
+The residuals look normally distributed; the proportion of large residuals is fine; the Q-Q-plot also looks fine.
+
+However, there are clear cut-offs in the predicted vs. residuals plot.
+That's because the outcome variable has (0 | 100) bounds.
+For example, a fitted value of 50 can be off by a maximum of -50 or 50, not lower or higher.
+Usually, this pattern happens with binomial distributions.
+However, I don't think using a binomial model would be appropriate here: a) the residuals are normally distributed; b) I would argue that a 100 rating slider is conceptually rather different than a proportion (I wouldn't know how to count successes and failures for a binomial distribution). 
+Therefore, I will maintain the linear model, because I believe it makes sense conceptually and displays decent fit.
+
+Moreover, two participants stand out as formal outliers: `pp_91` and `pp_48`.
+For foods, there's one stimulus with a large influence: `vegan_fillets`.
+I'll check whether the model is robust to their exclusion.
+```{r h1_sim_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h1_sim, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h1_sim, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h1_sim)
+
+# obtain outliers
+h1_sim_outliers_pp <- influence.ME::influence(h1_sim, c("pp"))
+h1_sim_outliers_food <- influence.ME::influence(h1_sim, c("food"))
+
+# plot formal outliers for pp
+plot(h1_sim_outliers_pp, which = 'cook')
+plot(h1_sim_outliers_pp, which = 'dfbetas')[1]
+plot(h1_sim_outliers_pp, which = 'dfbetas')[2]
+
+# which ones are the highest
+arrange_cook(h1_sim_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h1_sim_outliers_food, which = 'cook')
+plot(h1_sim_outliers_food, which = 'dfbetas')[1]
+plot(h1_sim_outliers_food, which = 'dfbetas')[2]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h1_sim_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h1_sim, type = c('p', 'smooth'))
+```
+
+The effect is highly significant.
+```{r h1_sim_pvalue}
+# get p-value
+h1_sim_p <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    simulations,
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_sim_p)
+
+# approximate effect size
+r.squaredGLMM(h1_sim)
+```
+
+#### 4.1.1.2 Attractiveness
+
+Next, I run the same model, but with `attractiveness` as outcome.
+```{r h1_attr_model}
+# construct model
+h1_attr <- lme4::lmer(
+  rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  attractiveness
+)
+
+# inspect model
+summary(h1_attr)
+```
+
+Let's inspect model diagnostics.
+All of them look good, and there's only one clear outlier: `veggie_burger`.
+```{r h1_attr_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h1_attr, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h1_attr, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h1_attr)
+
+# obtain outliers
+h1_attr_outliers_pp <- influence.ME::influence(h1_attr, c("pp"))
+h1_attr_outliers_food <- influence.ME::influence(h1_attr, c("food"))
+
+# plot formal outliers for pp
+plot(h1_attr_outliers_pp, which = 'cook')
+plot(h1_attr_outliers_pp, which = 'dfbetas')[1]
+plot(h1_attr_outliers_pp, which = 'dfbetas')[2]
+
+# which ones are the highest
+arrange_cook(h1_attr_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h1_attr_outliers_food, which = 'cook')
+plot(h1_attr_outliers_food, which = 'dfbetas')[1]
+plot(h1_attr_outliers_food, which = 'dfbetas')[2]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h1_attr_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h1_attr, type = c('p', 'smooth'))
+```
+
+Although the difference is quite small in absolute terms, it's still significant.
+```{r h1_attr_pvalue}
+# get p-value
+h1_attr_p <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    attractiveness,
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_attr_p)
+
+# approximate effect size
+r.squaredGLMM(h1_attr)
+```
+
+### 4.1.2 Exploratory
+
+Here, I conduct several checks to see whether the effects are robust to control variables and outlier exclusion.
+
+I start with including the participants with a high RSI that we excluded above.
+Their exclusion was not preregistered.
+
+The simulation model did not converge.
+I tried all current best practices:
+
+* increased number of iterations
+* start from previous fit
+* different optimizers
+* different contrasts
+
+In the end, only simplifying the model worked (aka removing the intercept for `food`).
+Under this condition, the effect remained significant.
+For attractiveness, the model converges and shows to be robust to the inclusion of those cases.
+```{r h1_high_rsi}
+# get p-value for simulations
+h1_sim_p_rsi <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (0 + label_type | food),
+    data = full_join(
+      simulations,
+      high_rsi %>% 
+        filter(measure == "simulations")
+    ),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+anova(h1_sim_p_rsi)
+
+# get p-value for attractiveness
+h1_attr_p_rsi <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    data = full_join( # add high rsi cases
+      attractiveness,
+      high_rsi %>% 
+        filter(measure == "attractiveness")
+    ),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+anova(h1_attr_p_rsi)
+```
+
+As a next step, I see whether the results are robust to the exclusion of the outliers I identified above.
+I start with the outliers on simulations: the effect remains significant.
+```{r h1_sim_exclude_outliers}
+# get p-value
+h1_sim_no_outliers <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    simulations %>% 
+      filter(
+        !pp %in% c("pp_91", "pp_48"),
+        food != "vegan_fillets"
+      ),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_sim_no_outliers)
+```
+
+Next, I remove the outliers on attractiveness: the effect remains robust.
+```{r h1_attr_exclude_outliers}
+# get p-value
+h1_attr_no_outliers <-
+  mixed(
+    rating ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    attractiveness %>% 
+      filter(food != "veggie_burger"),
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_attr_no_outliers)
+```
+
+As a last robustness check, I include two control variables, namely the attitude toward vegan/plant-based foods and the frequency of eating meat.
+For the former, we preregistered to take the mean of those two attitude variables.
+```{r mean_plant_attitude}
+simulations <-
+  simulations %>% 
+  mutate(
+    attitude_pb_vegan = c(attitude_pb + attitude_vegan) / 2
+  )
+
+attractiveness <-
+  attractiveness %>% 
+  mutate(
+    attitude_pb_vegan = (attitude_pb + attitude_vegan) / 2
+  )
+```
+
+Now, we include this average attitude and the frequency of eating meat as covariates.
+Because they are continuous, I'll grand-mean center them to make it easier to interpret their estimate.
+
+Apparently, attitudes toward plant-based/vegan food has a positive association with simulations, whereas frequency of eating meat has a negative association, regardless of label type.
+However, none of these associations are significant.
+The effect of label type is robust to the inclusion of these covariates.
+
+In contrast, attitude has a positive, significant association with attractiveness.
+The effect of label type remains significant.
+```{r h1_covariates}
+simulations <-
+  simulations %>% 
+  mutate_at(
+    vars(attitude_pb_vegan, meat_per_week),
+    list(c = ~ scale(., center = TRUE, scale = FALSE)) # create new columns with _c as suffix
+  )
+
+attractiveness <-
+  attractiveness %>% 
+  mutate_at(
+    vars(attitude_pb_vegan, meat_per_week),
+    list(c = ~ scale(., center = TRUE, scale = FALSE))
+  )
+
+# get descriptives
+describe_visualize(attractiveness, 
+                   attitude_pb_vegan,
+                   FALSE,
+                   TRUE)
+
+# fit model
+h1_sim_covariates_p <-
+  mixed(
+    rating ~
+    label_type +
+    attitude_pb_vegan_c +
+    meat_per_week_c +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    simulations,
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_sim_covariates_p)
+
+# fit model
+h1_attr_covariates_p <-
+  mixed(
+    rating ~
+    label_type +
+    attitude_pb_vegan_c +
+    meat_per_week_c +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+    attractiveness,
+    type = 3,
+    method = "S",
+    check_contrasts = FALSE
+  )
+
+# what is it
+anova(h1_attr_covariates_p)
+```
+
+## 4.2 H2: Interaction effect
+
+The preregistered hypothesis reads as follows:
+>This effect [of label types] may be stronger for plant-based food than for meat-based food.
+
+Again, I'll separate into confirmatory and exploratory sections.
+
+### 4.2.1 Confirmatory
+
+#### 4.2.1.1 Simulations
+
+Each combination of label type and food type was present for each participant, meaning that we should include a random effect for the interaction of label type and food type for `pp` as grouping factor.
+
+For the `food` grouping, each food type could only be plant-based or meat-based, meaning we cannot include a random slope of `food_type`.
+That also means we cannot model the interaction.
+We counterbalanced which food was assigned what label type across participants.
+Therefore, we will only model `label_type` as random slope for the `food` grouping.
+
+To obtain p-values later, for interactions and Type III tests, we need sum-to-zero contrasts.
+```{r h2_sim_model, error=TRUE, warning=TRUE}
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# run the model
+h2_sim <-
+  lme4::lmer(
+    rating ~
+      label_type * food_type +
+      (1 + label_type * food_type | pp) +
+      (1 + label_type | food),
+    simulations
+  )
+
+summary(h2_sim)
+```
+
+The model throws a convergence error.
+Looking at the summary, nothing really sticks out.
+Maybe some of the correlations are extremely low, so that might be problematic.
+Actually, since the newest update of `lme4`, the model fitting procedure has become more conservative.
+So I will follow the advice of Barr et al. (2013) and see whether I can get the warning to disappear.
+
+I will start with simply increasing the number of iterations.
+```{r h2_sim_model_maxiter, error=TRUE, warning=TRUE}
+h2_sim.2 <-
+  lme4::lmer(
+    rating ~
+      label_type * food_type +
+      (1 + label_type * food_type | pp) +
+      (1 + label_type | food),
+    simulations,
+    control = lmerControl(optCtrl = list(maxfun = 1e9))
+  )
+```
+
+The model still gives a convergence error.
+Next, I will restart from previous fit.
+```{r h2_sim_model_maxiter_restart, error = TRUE, warning=TRUE}
+starting_point <- getME(h2_sim.2, c("theta", "fixef"))
+h2_sim.3 <- update(h2_sim.2, 
+                      start = starting_point, 
+                      control = lmerControl(optCtrl = list(maxfun = 1e9)))
+```
+
+Next, I'll try out different optimizers.
+About half of the optimizers lead to a converging model; the ones that converge yield a singular fit warning.
+Newer versions of `lme4` throw this warning quite often, because the estimation has become more conservative.
+Overall, the fixed effects are (alomost) identical, which gives confidence in the model.
+The same goes for the random effects, except for one correlation with `bobyqa` as optimizer, which would explain the singularity warning.
+Overall, I believe we can trust the estimates and treat the convergence warning as a false-positive.
+```{r h2_sim_model_maxiter_optimizers}
+h2_sim_model_all <- afex::all_fit(h2_sim.3,
+                                  maxfun = 1e9)
+
+# which ones converged
+ok_fits <- sapply(h2_sim_model_all, is, "merMod")
+ok_fits
+
+# was fit okay?
+!sapply(h2_sim_model_all, inherits, "try-error")
+
+# compare fixed effects
+ok_fits_details <- h2_sim_model_all[ok_fits]
+t(sapply(ok_fits_details, "fixef"))
+
+# compare random effects
+t(sapply(ok_fits_details, getME, "theta"))
+```
+
+Let's inspect model diagnostics.
+They look good, with mostly normal residuals and a linear overall prediction.
+As for outliers, `pp_91` and `vegan_fillets `stand out a bit, so I will see whether the results hold up with their exclusion.
+```{r h2_sim_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h2_sim, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h2_sim, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h2_sim)
+
+# obtain outliers
+h2_sim_outliers_pp <- influence.ME::influence(h2_sim, c("pp"))
+h2_sim_outliers_food <- influence.ME::influence(h2_sim, c("food"))
+
+# plot formal outliers for pp
+plot(h2_sim_outliers_pp, which = 'cook')
+plot(h2_sim_outliers_pp, which = 'dfbetas')[1]
+plot(h2_sim_outliers_pp, which = 'dfbetas')[2]
+plot(h2_sim_outliers_pp, which = 'dfbetas')[3]
+plot(h2_sim_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h2_sim_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h2_sim_outliers_food, which = 'cook')
+plot(h2_sim_outliers_food, which = 'dfbetas')[1]
+plot(h2_sim_outliers_food, which = 'dfbetas')[2]
+plot(h2_sim_outliers_food, which = 'dfbetas')[3]
+plot(h2_sim_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h2_sim_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h2_sim, type = c('p', 'smooth'))
+```
+
+Unsurprisingly, we find two significant main effects, but no interaction: enhanced labels lead to more simulations; meat-based foods lead to more simulations; but the effect of label does not differ for food types.
+```{r h2_sim_pvalue}
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# get p-value
+h2_sim_p <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    simulations,
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+anova(h2_sim_p)
+
+# effect size approximation
+r.squaredGLMM(h2_sim)
+```
+
+#### 4.2.1.2 Attractiveness
+
+We run the same maximal model as with simulations.
+Unsurprisingly, the model yields a convergence error.
+I'll go through the same trouble shooting steps as above.
+```{r h2_attr_model}
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# run the model
+h2_attr <-
+  lme4::lmer(
+    rating ~
+      label_type * food_type +
+      (1 + label_type * food_type | pp) +
+      (1 + label_type | food),
+    attractiveness
+  )
+
+summary(h2_attr)
+```
+
+Increasing the number of iterations still yields a warning.
+```{r h2_attr_model_maxiter, error=TRUE, warning=TRUE}
+h2_attr.2 <-
+  lme4::lmer(
+    rating ~
+      label_type * food_type +
+      (1 + label_type * food_type | pp) +
+      (1 + label_type | food),
+    attractiveness,
+    control = lmerControl(optCtrl = list(maxfun = 1e9))
+  )
+```
+
+Restarting from previous fit does the same.
+```{r h2_attr_model_maxiter_restart, error = TRUE, warning=TRUE}
+starting_point <- getME(h2_attr.2, c("theta", "fixef"))
+h2_attr.3 <- update(h2_sim.2, 
+                      start = starting_point, 
+                      control = lmerControl(optCtrl = list(maxfun = 1e9)))
+```
+
+Next, I'll try out different optimizers.
+The story is similar to the interaction model with simulations.
+The fixed effects are almost identical. 
+There are slight differences in some of the random effects, but these seem minimal.
+Once again, I believe we can regard the convergence error as a false-positive.
+```{r h2_attr_model_maxiter_optimizers}
+h2_attr_model_all <- afex::all_fit(h2_attr.3,
+                                  maxfun = 1e9)
+
+# which ones converged
+ok_fits <- sapply(h2_attr_model_all, is, "merMod")
+ok_fits
+
+# was fit okay?
+!sapply(h2_attr_model_all, inherits, "try-error")
+
+# compare fixed effects
+ok_fits_details <- h2_attr_model_all[ok_fits]
+t(sapply(ok_fits_details, "fixef"))
+
+# compare random effects
+t(sapply(ok_fits_details, getME, "theta"))
+```
+
+The model diagnostics look good, similar to the simulation model.
+No particular participant stands out as an outlier, maybe `pp_59`.
+As for foods, `veggie_burger` sticks out quite clearly.
+I'll check whether the effects are robust to the exclusion of those two potential outliers.
+```{r h2_attr_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h2_attr, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h2_attr, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h2_attr)
+
+# obtain outliers
+h2_attr_outliers_pp <- influence.ME::influence(h2_attr, c("pp"))
+h2_attr_outliers_food <- influence.ME::influence(h2_attr, c("food"))
+
+# plot formal outliers for pp
+plot(h2_attr_outliers_pp, which = 'cook')
+plot(h2_attr_outliers_pp, which = 'dfbetas')[1]
+plot(h2_attr_outliers_pp, which = 'dfbetas')[2]
+plot(h2_attr_outliers_pp, which = 'dfbetas')[3]
+plot(h2_attr_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h2_attr_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h2_attr_outliers_food, which = 'cook')
+plot(h2_attr_outliers_food, which = 'dfbetas')[1]
+plot(h2_attr_outliers_food, which = 'dfbetas')[2]
+plot(h2_attr_outliers_food, which = 'dfbetas')[3]
+plot(h2_attr_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h2_attr_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h2_attr, type = c('p', 'smooth'))
+```
+
+As expected, the two main effects are significant, but the interaction is not.
+```{r h2_attr_pvalue}
+# get p-value
+h2_attr_p <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    attractiveness,
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+anova(h2_attr_p)
+
+# approximate effect size
+r.squaredGLMM(h2_attr)
+```
+
+### 4.2.2 Exploratory
+
+Once more, I run several robustness checks.
+I begin with including the eight people with a high RSI.
+The results don't change.
+```{r h2_high_rsi}
+# get p-value for simulations
+h2_sim_p_rsi <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    data = full_join(
+      simulations,
+      high_rsi %>% 
+        filter(measure == "simulations")
+    ),
+    type = 3,
+    method = "S"
+  )
+
+anova(h2_sim_p_rsi)
+
+# get p-value for attractiveness
+h2_attr_p_rsi <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    data = full_join(
+      attractiveness,
+      high_rsi %>% 
+        filter(measure == "attractiveness")
+    ),
+    type = 3,
+    method = "S"
+  )
+
+anova(h2_attr_p_rsi)
+```
+
+The effects on simulations are robust to the exclusion of outliers.
+```{r h2_sim_exclude_outliers}
+# get p-value
+h2_sim_no_outliers <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    simulations %>% 
+      filter(
+        !pp %in% c("pp_91"),
+        food != "vegan_fillets"
+      ),
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+anova(h2_sim_no_outliers)
+```
+
+The same goes for effects on attractiveness: both main effects are robust to the exclusion of outliers.
+```{r h2_attr_exclude_outliers}
+# get p-value
+h2_attr_no_outliers <-
+  mixed(
+    rating ~
+    label_type * food_type +
+    (1 + label_type * food_type | pp) +
+    (1 + label_type | food),
+    attractiveness %>% 
+      filter(
+        !pp %in% c("pp_59"),
+        food != "veggie_burger"
+      ),
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+anova(h2_attr_no_outliers)
+```
+
+## 4.3 H3: Simulations predict attractiveness
+
+The preregistered hypothesis reads as follows:
+>Across foods, simulation ratings will predict attractiveness ratings.
+
+### 4.3.1 Confirmatory
+
+Currently, the working file follows tidyverse conventions, with one observation per row.
+That means each participant has two rows per trials, one for their rating on simulations, one for their rating on attractiveness.
+The variables `measure` shows to what measure the `rating` belongs.
+
+To predict attractiveness from simulations, the ratings need to be on the same row, meaning a separate rating variable for both measures.
+So far, I split up `working_file` into a `simulations` file and an `attractiveness` file.
+I now combine those two to have both ratings per trial.
+
+Unfortunately, this is not super-straightforward:
+Both measures were presented on their own page, meaning that all variables relating to time (e.g., `page_median_time`) will be different in the two data sets.
+We won't need those for the merging, so I'll remove any variables that aren't identical across the two data sets (except for the ratings, of course).
+This is basically the same as spreading/pivoting `working_file` to wide format along the `measure` variable, but at this point I've done so many transformations etc. that removing and merging is easier.
+```{r merge_simulations_attractiveness}
+# remove time variables from simulation data set
+sim_merge <-
+  simulations %>% 
+  rename(simulation_rating = rating)  %>% 
+  select(
+    -measure, 
+    -time, 
+    -page_time_median, 
+    -contains("speed_factor")
+  )
+
+# same for attractiveness data set
+attr_merge <- 
+  attractiveness %>% 
+  rename(attractiveness_rating = rating) %>% 
+  select(
+    -measure, 
+    -time, 
+    -page_time_median, 
+    -contains("speed_factor")
+  )
+
+# merge the two
+wide_data <-
+  left_join(
+    sim_merge,
+    attr_merge
+  ) %>% 
+  select( # reorder variable names, purely cosmetic
+    pp:simulation_rating,
+    attractiveness_rating,
+    everything()
+  )
+```
+
+Next, we predict attractiveness with simulations, whilst controlling for label and food type.
+`simulations` is continuous, so I'll center it.
+The model fails to converge.
+```{r h3_model_main_effects, error=TRUE, warning=TRUE}
+# what's the raw correlation
+cor(wide_data$simulation_rating, wide_data$attractiveness_rating, use = "pairwise.complete.obs")
+
+# center predictor
+wide_data <-
+  wide_data %>% 
+  mutate(
+    simulation_rating_c = scale(simulation_rating, center = TRUE, scale = FALSE)
+  )
+
+wide_data %>% 
+  count(food, label_type)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# run the model
+h3_main <-
+  lme4::lmer(
+    attractiveness_rating ~
+      simulation_rating_c + label_type + food_type +
+      (1 + simulation_rating_c + label_type + food_type | pp) +
+      (1 + simulation_rating_c + label_type | food),
+    wide_data
+  )
+```
+
+Often, it can help to standardize continuous predictors.
+The model still throws a convergence warning, so I'll continue with the same troubleshooting steps as previously.
+```{r h3_model_main_effects_s, warning=TRUE, error=TRUE}
+# standardize attractiveness rating
+wide_data <-
+  wide_data %>% 
+  mutate(
+    simulation_rating_s = scale(simulation_rating, scale = TRUE)
+  )
+
+# run the model
+h3_main_s <-
+  lme4::lmer(
+    attractiveness_rating ~
+      simulation_rating_s + label_type + food_type +
+      (1 + simulation_rating_s + label_type + food_type | pp) +
+      (1 + simulation_rating_s + label_type | food),
+    wide_data
+  )
+
+summary(h3_main_s)
+```
+
+Increase number of iterations.
+Still receive a warning.
+```{r h3_model_main_effects_s_maxiter, warning=TRUE, error=TRUE}
+# run the model
+h3_main_s.2 <-
+  lme4::lmer(
+    attractiveness_rating ~
+      simulation_rating_s + label_type + food_type +
+      (1 + simulation_rating_s + label_type + food_type | pp) +
+      (1 + simulation_rating_s + label_type | food),
+    wide_data,
+    control = lmerControl(optCtrl = list(maxfun = 1e9))
+  )
+
+summary(h3_main_s.2)
+```
+
+Restart from previous fit.
+Same warning.
+```{r h3_model_main_effects_s_maxiter_restart, warning=TRUE, error=TRUE}
+# run the model
+starting_point <- getME(h3_main_s.2, c("theta", "fixef"))
+h3_main_s.3 <- update(h3_main_s.2, 
+                      start = starting_point, 
+                      control = lmerControl(optCtrl = list(maxfun = 1e9)))
+
+summary(h3_main_s.3)
+```
+
+Like previously, I check whether the estimates are consistent across optimizers.
+Once again, the estimates are identical across optimizers.
+```{r h3_model_main_effects_s_optimizer, warning=TRUE, error=TRUE}
+h3_main_model_s_all <- afex::all_fit(h3_main_s.3,
+                                  maxfun = 1e9)
+
+# which ones converged
+ok_fits <- sapply(h3_main_model_s_all, is, "merMod")
+ok_fits
+
+# was fit okay?
+!sapply(h3_main_model_s_all, inherits, "try-error")
+
+# compare fixed effects
+ok_fits_details <- h3_main_model_s_all[ok_fits]
+t(sapply(ok_fits_details, "fixef"))
+
+# compare random effects
+t(sapply(ok_fits_details, getME, "theta"))
+```
+
+Next, I inspect the model diagnostics.
+`pp_59` could be an outlier.
+As for foods, `spring_rolls` and `veggie_burger` are potential outliers.
+```{r h3_main_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h3_main, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h3_main, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h3_main)
+
+# obtain outliers
+h3_main_outliers_pp <- influence.ME::influence(h3_main, c("pp"))
+h3_main_outliers_food <- influence.ME::influence(h3_main, c("food"))
+
+# plot formal outliers for pp
+plot(h3_main_outliers_pp, which = 'cook')
+plot(h3_main_outliers_pp, which = 'dfbetas')[1]
+plot(h3_main_outliers_pp, which = 'dfbetas')[2]
+plot(h3_main_outliers_pp, which = 'dfbetas')[3]
+plot(h3_main_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h3_main_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h3_main_outliers_food, which = 'cook')
+plot(h3_main_outliers_food, which = 'dfbetas')[1]
+plot(h3_main_outliers_food, which = 'dfbetas')[2]
+plot(h3_main_outliers_food, which = 'dfbetas')[3]
+plot(h3_main_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h3_main_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h3_main, type = c('p', 'smooth'))
+```
+
+Once we include simulations as predictor, labels don't have an effect on attractiveness anymore.
+This can have several explanations.
+Simulation and attractiveness ratings are highly correlated, meaning that simulations explain so much variance that there is little left to explain for the label type.
+It could also be an issue of multicollinearity.
+It is also possible that simulations mediate the effect of label type.
+However, attractiveness was assessed before simulations, ruling out causal mediation.
+```{r h3_main_pvalue}
+# get p-value
+h3_main_p <-
+  mixed(
+    attractiveness_rating ~
+    simulation_rating_s + label_type + food_type + 
+    (1 + simulation_rating_s + label_type + food_type | pp) +
+    (1 + simulation_rating_s + label_type | food),
+    wide_data,
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+summary(h3_main_p)
+
+# approximate effect size
+r.squaredGLMM(h3_main)
+```
+
+### 4.3.2 Exploratory
+
+Once more, I run several robustness checks.
+I begin with including the eight people with a high RSI.
+For that, I need to merge the high-rsi cases with the analysis file.
+The results don't change.
+```{r h3_high_rsi}
+# create high rsi file for merging
+rsi_merge <-
+  high_rsi %>% 
+  select( # remove the same time variables
+    -time, 
+    -page_time_median, 
+    -contains("speed_factor")
+  ) %>% 
+  pivot_wider( # turn into wide format
+    names_from = measure,
+    values_from = rating
+  ) %>% 
+  rename( # same names as in data_wide
+    attractiveness_rating = attractiveness,
+    simulation_rating = simulations
+  )
+  
+# get p-value for simulations
+h3_main_p_rsi <-
+  mixed(
+    attractiveness_rating ~
+    simulation_rating_s + label_type + food_type +
+    (1 + simulation_rating_s + label_type + food_type | pp) +
+    (1 + simulation_rating_s + label_type | food),
+    data = left_join(
+      wide_data %>% 
+        select(
+          pp:rsi # so we have the same columns in both data sets, didn't do transformations (centering etc.) for high_rsi data set
+        ),
+      high_rsi
+    ) %>% 
+      mutate(
+        simulation_rating_s = scale(simulation_rating, scale = TRUE)
+      ),
+    type = 3,
+    method = "S"
+  )
+
+anova(h3_main_p_rsi)
+```
+
+The effects on simulations are robust to the exclusion of outliers.
+```{r h3_exclude_outliers}
+# get p-value
+h3_main_no_outliers <-
+  mixed(
+    attractiveness_rating ~
+    simulation_rating_s + label_type + food_type +
+    (1 + simulation_rating_s + label_type + food_type | pp) +
+    (1 + simulation_rating_s + label_type | food),
+    wide_data %>% 
+      filter(
+        !pp %in% c("pp_59"),
+        !food %in% c("spring_rolls", "veggie_burger")
+      ),
+    type = 3,
+    method = "S"
+  )
+
+# what is it
+anova(h3_main_no_outliers)
+```
+
+Next, we want to know whether simulation ratings interaction with either of the factors.
+I begin with adding an interaction term of `simulation_rating_s` and `label_type`.
+Actually, we don't even need to fit a model, the two slopes are almost identical (although this doesn't take the nested nature into account), backed up by the low estimate and p-value.
+```{r h3_interaction_label_types}
+# plot the interaction
+ggplot(wide_data,
+       aes(
+         x = simulation_rating_s, 
+         y = attractiveness_rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = label_type))
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# run the model
+h3_interaction_label_type <-
+  mixed(
+    attractiveness_rating ~
+      simulation_rating_s*label_type + food_type +
+      (1 + simulation_rating_s*label_type + food_type | pp) +
+      (1 + simulation_rating_s*label_type | food),
+    wide_data,
+    type = 3,
+    method = "S"
+  )
+
+summary(h3_interaction_label_type)
+anova(h3_interaction_label_type)
+```
+
+For food type, the plot shows the two main effects, but no interaction.
+This is backed up by the model.
+```{r h3_interaction_food_types}
+# plot the interaction
+ggplot(wide_data,
+       aes(
+         x = simulation_rating_s, 
+         y = attractiveness_rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type))
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# run the model
+h3_interaction_food_type <-
+  mixed(
+    attractiveness_rating ~
+      simulation_rating_s*food_type + label_type +
+      (1 + simulation_rating_s*food_type + label_type | pp) +
+      (1 + simulation_rating_s | food),
+    wide_data,
+    type = 3,
+    method = "S"
+  )
+
+summary(h3_interaction_food_type)
+anova(h3_interaction_food_type)
+```
+
+## H4: Intention to reduce meat
+The preregistered hypothesis reads as follows:
+>The intention to reduce meat will be associated positively with attractiveness ratings for the plant-based foods, and negatively with desire (sic: simulations) for meat-based foods.
+
+For this hypothesis, I run two interaction models, predicting attractiveness and simulations from the interaction of `food_type` and intention to reduce meat eating (`change_diet`).
+
+### 4.1 Confirmatory
+
+#### 4.1.1 Attractiveness
+
+Indeed, there is a positive raw relation between the intention to reduce eating meat and attractiveness ratings for plant-based foods.
+For meat-based foods, this relation looks flat.
+The model throws a convergence error, but that disappears when using the `bobyqa` optimizer.
+```{r h4_attr_model}
+# standardize intention to eat meat
+attractiveness <-
+  attractiveness %>% 
+  mutate(
+    change_diet_s = scale(change_diet, scale = TRUE)
+  )
+
+# plot
+ggplot(attractiveness,
+       aes(
+         x = change_diet_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# construct model
+h4_attr <- lme4::lmer(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness,
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+# inspect model
+summary(h4_attr)
+```
+
+`pp_59` and `pp_129` are potential influential case.
+There are two potential outliers in foods: `haddock`, `spring_rolls`.
+```{r h4_attr_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h4_attr, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h4_attr, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h4_attr)
+
+# obtain outliers
+h4_attr_outliers_pp <- influence.ME::influence(h4_attr, c("pp"))
+h4_attr_outliers_food <- influence.ME::influence(h4_attr, c("food"))
+
+# plot formal outliers for pp
+plot(h4_attr_outliers_pp, which = 'cook')
+plot(h4_attr_outliers_pp, which = 'dfbetas')[1]
+plot(h4_attr_outliers_pp, which = 'dfbetas')[2]
+plot(h4_attr_outliers_pp, which = 'dfbetas')[3]
+plot(h4_attr_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h4_attr_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h4_attr_outliers_food, which = 'cook')
+plot(h4_attr_outliers_food, which = 'dfbetas')[1]
+plot(h4_attr_outliers_food, which = 'dfbetas')[2]
+plot(h4_attr_outliers_food, which = 'dfbetas')[3]
+plot(h4_attr_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h4_attr_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h4_attr, type = c('p', 'smooth'))
+```
+
+Next, we see whether the interaction is significant.
+It is, so I also estimate the simple slopes, which show the expected stronger association for plant-based compared to meat-based foods.
+```{r}
+# get p-value
+h4_attr_p <- mixed(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness,
+  type = 3,
+  method = "S",
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+summary(h4_attr_p)
+
+# simple slopes
+emtrends(
+  h4_attr,
+  pairwise ~ food_type,
+  var = "change_diet_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(h4_attr)
+```
+
+#### 4.1.2 Simulations
+
+In the simulation model, we see the opposite of the hypothesis: There is a **stronger** positive raw association for plant-based compared to meat-based foods, and meat-based foods evoke stronger simulations overall.
+```{r h4_sim_model}
+# standardize intention to eat meat
+simulations <-
+  simulations %>% 
+  mutate(
+    change_diet_s = scale(change_diet, scale = TRUE)
+  )
+
+# plot
+ggplot(simulations,
+       aes(
+         x = change_diet_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) +
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# construct model
+h4_sim <- lme4::lmer(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations
+)
+
+# inspect model
+summary(h4_sim)
+```
+
+`pp_103` is a potential influential case.
+There are three potential outliers in foods: `vegan_fillets`, `haddock`, `salsa_pizza`.
+```{r h4_sim_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h4_sim, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h4_sim, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h4_sim)
+
+# obtain outliers
+h4_sim_outliers_pp <- influence.ME::influence(h4_sim, c("pp"))
+h4_sim_outliers_food <- influence.ME::influence(h4_sim, c("food"))
+
+# plot formal outliers for pp
+plot(h4_sim_outliers_pp, which = 'cook')
+plot(h4_sim_outliers_pp, which = 'dfbetas')[1]
+plot(h4_sim_outliers_pp, which = 'dfbetas')[2]
+plot(h4_sim_outliers_pp, which = 'dfbetas')[3]
+plot(h4_sim_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h4_sim_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h4_sim_outliers_food, which = 'cook')
+plot(h4_sim_outliers_food, which = 'dfbetas')[1]
+plot(h4_sim_outliers_food, which = 'dfbetas')[2]
+plot(h4_sim_outliers_food, which = 'dfbetas')[3]
+plot(h4_sim_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h4_sim_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h4_sim, type = c('p', 'smooth'))
+```
+
+Next, we see whether the interaction is significant.
+It is, but barely.
+I also estimate the simple slopes, which show a stronger association for plant-based compared to meat-based foods.
+```{r}
+# get p-value
+h4_sim_p <- mixed(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations,
+  type = 3,
+  method = "S"
+)
+
+anova(h4_sim_p)
+
+# simple slopes
+emtrends(
+  h4_sim,
+  pairwise ~ food_type,
+  var = "change_diet_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(h4_sim)
+```
+
+### 4.2 Exploratory
+
+Just as before, I check whether the inclusion of those with a high RSI change anything about the results.
+The results don't change for attractiveness, but for simulations the main effect of the intention to reduce eating meat is not significant anymore.
+```{r h4_high_rsi}
+# get p-value for attractiveness
+h4_attr_p_rsi <-
+  mixed(
+    rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+    data = full_join( # add high rsi cases
+      attractiveness,
+      high_rsi %>% 
+        filter(measure == "attractiveness") %>% 
+        mutate(change_diet_s = scale(change_diet, scale = TRUE))
+    ),
+    type = 3,
+    method = "S",
+    control = lmerControl(optimizer = "bobyqa")
+  )
+
+anova(h4_attr_p_rsi)
+
+# get p-value for simulations
+h4_sim_p_rsi <-
+  mixed(
+    rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+    data = full_join( # add high rsi cases
+      simulations,
+      high_rsi %>% 
+        filter(measure == "simulations") %>% 
+        mutate(change_diet_s = scale(change_diet, scale = TRUE))
+    ),
+    type = 3,
+    method = "S"
+  )
+
+anova(h4_sim_p_rsi)
+```
+
+As a next step, I see whether the results are robust to the exclusion of the outliers I identified above.
+I start with the outliers on attractiveness: the effect remains significant.
+```{r h4_attr_exclude_outliers}
+# get p-value
+h4_attr_no_outliers <- mixed(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness %>% 
+    filter(!pp %in% c("pp_59", "pp_129")) %>% 
+    filter(!food %in% c("haddock", "spring_rolls")),
+  type = 3,
+  method = "S",
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+anova(h4_attr_no_outliers)
+```
+
+Next, I remove the outliers on simulations: the interaction effect remains robust, but the main effect does not.
+```{r h4_sim_exclude_outliers}
+# get p-value
+h4_sim_no_outliers <- mixed(
+  rating ~
+    change_diet_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations %>% 
+    filter(pp != "pp_103") %>% 
+    filter(!food %in% c("vegan_fillets", "haddock", "salsa_pizza")),
+  type = 3,
+  method = "S"
+)
+
+anova(h4_sim_no_outliers)
+```
+
+## 4.2 Further exploratory tests
+
+Out of interest, I'd like to see the interaction in H4 with meat eating frequency.
+```{r expl_attr_meat_eating_frequency}
+# standardize the predictor
+attractiveness <-
+  attractiveness %>% 
+  mutate(
+    meat_per_week_s = scale(meat_per_week, scale = TRUE)
+  )
+
+# plot
+ggplot(attractiveness,
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_attr_meat <- lme4::lmer(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness)
+
+summary(exp_attr_meat)
+
+# get p-value
+exp_attr_meat_p <- mixed(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness,
+  type = 3,
+  method = "S")
+
+anova(exp_attr_meat_p)
+
+# simple slopes
+emtrends(
+  exp_attr_meat_p,
+  pairwise ~ food_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_attr_meat)
+```
+
+The same for simulations.
+```{r expl_sim_meat_eating_frequency}
+# standardize the predictor
+simulations <-
+  simulations %>% 
+  mutate(
+    meat_per_week_s = scale(meat_per_week, scale = TRUE)
+  )
+
+# plot
+ggplot(simulations,
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_sim_meat <- lme4::lmer(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations)
+
+summary(exp_sim_meat)
+
+# get p-value
+exp_sim_meat_p <- mixed(
+  rating ~
+    meat_per_week_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  simulations,
+  type = 3,
+  method = "S")
+
+anova(exp_sim_meat_p)
+
+# simple slopes
+emtrends(
+  exp_sim_meat_p,
+  pairwise ~ food_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_sim_meat)
+```
+
+Another interest: Do labels help frequent meat eaters in finding plant-based foods more attractive?
+Specifically, do enhanced labels reduce the association between frequency of eating meat and simulations/attractiveness (only plant-based).
+
+I check that with attractiveness first.
+Indeed, the more meat people eat, the less they find plant-based foods attractive, but less so for enhanced food labels.
+```{r expl_attr_meat_eating_labels}
+# plot
+ggplot(attractiveness %>% 
+         filter(food_type == "plant_based"),
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = label_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_attr_meat_labels <- lme4::lmer(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  attractiveness %>% 
+    filter(food_type == "plant_based"))
+
+summary(exp_attr_meat_labels)
+
+# get p-value
+exp_attr_meat_labels_p <- mixed(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  attractiveness %>% 
+    filter(food_type == "plant_based"),
+  type = 3,
+  method = "S")
+
+anova(exp_attr_meat_labels_p)
+
+# simple slopes
+emtrends(
+  exp_attr_meat_labels_p,
+  pairwise ~ label_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_attr_meat_labels)
+```
+
+The pattern looks similar for simulations, but the interaction is not significant.
+```{r expl_sim_meat_eating_labels}
+# plot
+ggplot(simulations %>% 
+         filter(food_type == "plant_based"),
+       aes(
+         x = meat_per_week_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = label_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_sim_meat_labels <- lme4::lmer(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations %>% 
+    filter(food_type == "plant_based"),
+  control = lmerControl(optimizer = "bobyqa"))
+
+summary(exp_sim_meat_labels)
+
+# get p-value
+exp_sim_meat_labels_p <- mixed(
+  rating ~
+    meat_per_week_s * label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations %>% 
+    filter(food_type == "plant_based"),
+  type = 3,
+  method = "S",
+  control = lmerControl(optimizer = "bobyqa"))
+
+anova(exp_sim_meat_labels_p)
+
+# simple slopes
+emtrends(
+  exp_sim_meat_labels_p,
+  pairwise ~ label_type,
+  var = "meat_per_week_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_sim_meat_labels)
+```
+
+# 5. Write final files
+
+Last, I write the final analysis files.
+I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
+```{r write_final_files}
+# save models
+save(
+  h4_attr, 
+  h4_sim, 
+  exp_attr_meat, 
+  exp_sim_meat, 
+  exp_attr_meat_labels, 
+  exp_sim_meat_labels, 
+  file = here("plots", "models", "models.RData")
+)
+
+# final file
+write_csv(working_file, here("data", "study2", "analysis_file.csv"))
+
+# attractiveness only
+write_csv(attractiveness, here("data", "study2", "attractiveness.csv"))
+
+# simulations only
+write_csv(simulations, here("data", "study2", "simulations.csv"))
+
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
