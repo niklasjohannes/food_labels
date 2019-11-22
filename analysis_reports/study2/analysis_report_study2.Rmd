@@ -22,6 +22,7 @@ This file explains all data processing and analysis steps for [Project Title].
 The RProject has a private library in order to make all steps computationally reproducible.
 I use the `renv` package for this.
 That means you will need to install the package and run the `renv::restore` command, see instructions [here](https://github.com/rstudio/renv).
+This works best if you don't have the `library` and `staging` folder within the `renv` folder.
 ```{r load_libraries}
 # pacman makes it easier to load and install packages
 if (!requireNamespace("pacman"))
@@ -668,7 +669,7 @@ DT::datatable(
     scrollX = TRUE, 
     pageLength = 5
   )
-  )
+  ) 
 ```
 
 # 2. Exclusions
@@ -742,7 +743,7 @@ working_file %>%
     scrollX = TRUE, 
     pageLength = 3
   )
-  )
+  ) 
 ```
 
 ## 2.3 Not fulfilling inclusion criteria
