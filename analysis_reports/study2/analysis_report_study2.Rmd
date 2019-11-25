@@ -3058,8 +3058,54 @@ emtrends(
 r.squaredGLMM(exp_attr_hunger_food)
 ```
 
-# 5. Write final files
+If indeed there is a cultural preference for meat when people are hungry (aka when I'm hunger I want a proper meal, and meat is a proper meal), then this could also be reflected in attitudes toward different foods.
+Thus, I'll inspect whether hunger predicts the attitudes for the three food types.
+Looking at the plot, it does not; this is backed up by the raw correlations.
+```{r exp_hunger_attitudes}
+# scatterplots
+ggplot(working_file %>% 
+         
+         # trait variables, therefore only one measure per participant
+         group_by(pp) %>% 
+         slice(1) %>% 
+         select(
+           pp,
+           hungry,
+           attitude_meat,
+           attitude_vegan,
+           attitude_pb
+         ) %>% 
+         ungroup() %>% 
+         
+         # turn into long format
+         pivot_longer(
+           cols = c(-pp, -hungry),
+           names_to = c("attitude"),
+           values_to = "score"
+        ),
+       aes(
+         x = hungry,
+         y = score,
+         color = attitude
+       )
+  ) +
+  geom_point() + 
+  geom_smooth(method = "lm")
 
+# raw correlations
+working_file %>%
+  group_by(pp) %>%
+  slice(1) %>%
+  ungroup() %>% 
+  select(hungry,
+         attitude_meat,
+         attitude_vegan,
+         attitude_pb) %>%
+  cor(., method = "pearson")
+```
+
+
+# 5. Write final files
 Last, I write the final analysis files.
 I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
 ```{r write_final_files}

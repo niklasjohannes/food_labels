@@ -1,0 +1,381 @@
+---
+title: "Data Analysis Report Study 1"
+author: "Niklas Johannes"
+date: "25/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE,
+                      cache = TRUE)
+```
+
+This file explains all data processing and analysis steps for Study 1 of [Project Title].
+The RProject has a private library in order to make all steps computationally reproducible.
+I use the `renv` package for this.
+That means you will need to install the package and run the `renv::restore` command, see instructions [here](https://github.com/rstudio/renv).
+```{r load_libraries}
+# pacman makes it easier to load and install packages
+if (!requireNamespace("pacman"))
+  install.packages("pacman")
+
+library(pacman)
+
+# load packages
+p_load(
+  here,
+  janitor,
+  tidyverse
+)
+
+# set seed
+set.seed(42)
+```
+
+```{r custom_functions}
+
+```
+
+
+# 1. Load data and wrangle data
+First, we load the data.
+For a codebook, see the [enter file name] file.
+```{r load_data}
+raw_data <- read_csv(
+  here("data", "study1", "raw_data.csv")
+  )
+```
+
+The variable names aren't in a nice format.
+Notably, they all contain `_all_items_final` at the end and are in all upper case.
+I will first remove the `_all_items_final` part from the variable names and then use the `janitor` package to get nicer variable names.
+```{r clean_names}
+# use a working file from now on
+working_file <- raw_data
+
+# remove variable name part
+names(working_file) <-
+  names(working_file) %>% 
+  str_remove(., "_all_items_final")
+
+# get variable names in snake case
+working_file <- 
+  clean_names(working_file)
+
+# inspect data
+glimpse(working_file)
+```
+
+Next, I add a food type category based on the subject number (`subjectnr` indicates the food ID):
+
+* 1-80: vegan
+* 81-160: vegetarian
+* 161-240: meat-based
+```{r add_food_type}
+working_file <-
+  working_file %>% 
+  mutate(
+    food_type = case_when(
+      subjectnr %in% 1:80 ~ "vegan",
+      subjectnr %in% 81:160 ~ "vegetarian",
+      subjectnr %in% 161:240 ~ "meat_based"
+    )
+  ) %>% 
+  rename( # give more sensible name for food ID
+    "food_id" = "subjectnr"
+  )
+```
+
+At this point, we also don't have the actual food names in the data set.
+Although we don't necessarily need them in the analysis, I'll add them for completeness' sake.
+
+The food label data set is in the long format, meaning I first need to get unique food names, then add them to working file.
+```{r add_food_names}
+# read the file with food names and features
+food_labels <-
+  read_csv(
+    here("data", "study1", "food_labels.csv")
+  )
+
+# add food names to raw_data
+working_file <-
+  working_file %>% 
+    add_column(
+      food = unique(food_labels$food)
+    ) %>% # reorder variable names
+  select(food_id, food, everything())
+```
+
+Next, I create the total number of features produced per food item and the proportion of features for each item.
+```{r total_features}
+# add total features per item and remove ambigous and nonwords
+working_file <-
+  working_file %>%
+  select(-ambiguous, -nonword) %>% 
+  mutate(
+    total = rowSums(select(., production:neg_coping))
+  )
+
+# add proportion of each feature in relation to total number of features
+total_proportions <-
+  working_file %>% 
+  mutate_at(
+    vars(production:neg_coping),
+    list(~ . / total)
+  )
+
+# add an identifier of that variable name
+names(total_proportions)[3:45] <-
+  names(total_proportions %>% 
+          select(production:neg_coping)) %>% 
+  str_replace(., "$", "_proportion")
+
+# add those proportion variables to working file
+working_file <-
+  left_join(
+    working_file,
+    total_proportions
+  )
+```
+
+I repeat these two steps for the three main categories: consumption situations, non-consumption situations, and situation-independent situations.
+```{r per_category_features}
+# get total number of features per category
+working_file <-
+  working_file %>% 
+    mutate(
+      consumption_total = rowSums(select(., taste_flavor:neg_coping)),
+      non_consumption_total = rowSums(select(., production:prep_stor, cult_embed)),
+      situation_independent_total = rowSums(select(., ingred_cont:long_ter_neg, overall_pos_eval:linguistic))
+    )
+
+# now proportion of features in that category
+category_proportions <-
+  working_file %>% 
+    mutate_at(
+      vars(
+        consumption_total,
+        non_consumption_total,
+        situation_independent_total
+      ),
+      list(~ . / total)
+    ) %>% select(food_id, consumption_total:situation_independent_total)
+
+# add an identifier for those variables
+names(category_proportions)[2:4] <-
+  names(category_proportions %>% 
+  select(-food_id)) %>% 
+  str_replace(., "total", "proportion")
+
+# add those proportion variables to working file
+working_file <-
+  left_join(
+    working_file,
+    category_proportions,
+    by = c("food_id")
+  )
+```
+
+Last, I do the same for the different sub-categories of consumption situations: sensory & reward, immediate positive consequences, immediate negative consequences, and contextual features.
+```{r per_sub_category_features}
+# get total number of features per sub-category
+working_file <-
+  working_file %>% 
+    mutate(
+      sensory_total = rowSums(select(., taste_flavor:action)),
+      positive_total = rowSums(select(.,
+                                      pos_conform_goals,
+                                      pos_social_goals,
+                                      pos_bodily_conseq:pos_coping)),
+      negative_total = rowSums(select(.,
+                                neg_conform_goals,
+                                neg_social_goals,
+                                neg_bodily_conseq:neg_coping)),
+      contextual_total = rowSums(select(., cont_bodily:cont_consumable))
+    )
+
+# now proportion of features in that category
+sub_category_proportions <-
+  working_file %>% 
+    mutate_at(
+      vars(sensory_total:contextual_total),
+      list(~ . / total)
+    ) %>% select(food_id, sensory_total:contextual_total)
+
+# add an identifier for those variables
+names(sub_category_proportions)[2:5] <-
+  names(sub_category_proportions %>% 
+  select(-food_id)) %>% 
+  str_replace(., "total", "proportion")
+
+# add those proportion variables to working file
+working_file <-
+  left_join(
+    working_file,
+    sub_category_proportions,
+    by = c("food_id")
+  )
+```
+
+Okay, now the file contains all information, but is not following tidy data conventions.
+```{r tidy_data}
+# first add an identifier to the feature count variables
+names(working_file)[3:45] <-
+  names(working_file %>% 
+          select(production:neg_coping)) %>% 
+  str_replace(., "$", "_count")
+
+# then pivot to longer
+working_file <-
+  working_file %>% 
+    pivot_longer(
+      cols = c(production_count:neg_coping_count, production_proportion:neg_coping_proportion),
+      names_to = c("feature", ".value"), # period to tell tidyr that that's where the value is
+      names_sep = "_(?!.*_)", # looks for last underscore as the separator (which separates count and proportion)
+      values_drop_na = TRUE
+    ) %>% 
+    select( #reorder variables
+      food_id,
+      food,
+      food_type,
+      feature:proportion,
+      total,
+      consumption_total:situation_independent_total,
+      sensory_total:contextual_total,
+      consumption_proportion:situation_independent_proportion,
+      sensory_proportion:contextual_proportion
+    ) %>% # assign proper variable types
+    mutate_at(
+      vars(contains("food"), feature),
+      list(~ as.factor(.))
+    )
+```
+
+# 2. Describe and visualize
+Next, I visualize the different variables.
+I'll start with the total number of features per foood.
+Overall, it looks skewed with a long left tail, but without a really clear visual outlier.
+```{r visualize_totals_per_food}
+# number of features per food
+ggplot(
+  data = working_file,
+  aes(
+    x = reorder(food, count),
+    y = count
+  )
+) +
+  geom_bar(
+    stat = "identity"
+  )
+
+# distribution of features per food
+ggplot(data = working_file %>% group_by(food) %>% slice(1),
+       aes(
+         x = total
+       )) + 
+  geom_density(color = "darkgrey", 
+               fill = "darkgrey")
+
+# summary stats
+working_file %>%
+  pull(total) %>% 
+  stat.desc()
+```
+
+Next, I'll do the same with the proportions proportions of consumption situtation features.
+Looks pretty much like a binomial or beta distribution.
+One food didn't have any of those features in its labels.
+```{r visualize_consumption_features}
+describe_visualize(
+  working_file,
+  consumption_proportion,
+  FALSE,
+  TRUE
+)
+```
+
+Similar picture for non-consupmtion situations, but with more mass toward the middle, reflected in higher mean.
+```{r visualize_non_consumption_features}
+describe_visualize(
+  working_file,
+  non_consumption_proportion,
+  FALSE,
+  TRUE
+)
+```
+
+Situation-independent features have a different distribution with a strong left skew.
+```{r visualize_independent_features}
+describe_visualize(
+  working_file,
+  situation_independent_proportion,
+  FALSE,
+  TRUE
+)
+```
+
+Last, I want to look at the three sub-categories of consumption features (negative immediate consequences didn't have any features, which is why I leave it out from now on).
+```{r visualize_sub_features}
+working_file %>% 
+  # only select foods and the four sub-categories
+  select(
+    food_id,
+    food,
+    sensory_proportion,
+    positive_proportion,
+    contextual_proportion
+  ) %>% 
+  group_by(food) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  # turn into wide format for pivoting later
+  pivot_longer(
+    cols = c(-food_id, -food),
+    names_to = c("feature_type", ".value"),
+    names_sep = "_"
+  ) %>% 
+  ggplot(
+    aes(x = proportion)
+  ) +
+  geom_density(color = "darkgrey", fill = "darkgrey") + 
+  facet_wrap(~ feature_type)
+  
+```
+
+Alright, next I visualize the three main feature categories by food category, starting with consumption features.
+```{r consumption_by_food_type}
+three_violins(working_file, consumption_proportion)
+summary_stats(working_file, consumption_proportion)
+```
+
+Next non-consumption features.
+```{r non_consumption_by_food_type}
+three_violins(working_file, non_consumption_proportion)
+summary_stats(working_file, non_consumption_proportion)
+```
+
+Followed by situation-independent features.
+```{r independent_by_food_type}
+three_violins(working_file, situation_independent_proportion)
+summary_stats(working_file, situation_independent_proportion)
+```
+
+The same for the four sub-categories, starting with sensory and action features.
+```{r sensory_by_food_type}
+three_violins(working_file, sensory_proportion)
+summary_stats(working_file, sensory_proportion)
+```
+
+Next: Positive immediate consequences.
+```{r positive_by_food_type}
+three_violins(working_file, positive_proportion)
+summary_stats(working_file, positive_proportion)
+```
+
+Contexutal features.
+```{r contextual_by_food_type}
+three_violins(working_file, contextual_proportion)
+summary_stats(working_file, contextual_proportion)
+```
