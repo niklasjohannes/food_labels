@@ -3002,6 +3002,62 @@ emtrends(
 r.squaredGLMM(exp_sim_meat_labels)
 ```
 
+I'd also be interested whether a feeling of hunger interacts with food type when predicting attractiveness.
+It does such that for meat-based foods an increase in hunger is associated with higher attractiveness, whereas the opposite is the case for plant-based foods.
+```{r expl_hunger_food_labels_attr}
+# scale hunger
+attractiveness <-
+  attractiveness %>% 
+  mutate(hungry_s = scale(hungry, center = TRUE, scale = FALSE))
+
+# plot
+ggplot(attractiveness,
+       aes(
+         x = hungry_s, 
+         y = rating
+        )
+      )+ 
+  geom_smooth(method = "lm", aes(color = food_type)) + 
+  ylim(0, 100)
+
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# fit model
+exp_attr_hunger_food <- lme4::lmer(
+  rating ~
+    hungry_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness
+)
+
+summary(exp_attr_hunger_food)
+
+# get p-value
+exp_attr_hunger_food_p <- mixed(
+  rating ~
+    hungry_s * food_type +
+    (1 + food_type | pp) +
+    (1 | food),
+  attractiveness,
+  type = 3,
+  method = "S"
+)
+
+anova(exp_attr_hunger_food_p)
+
+# simple slopes
+emtrends(
+  exp_attr_hunger_food_p,
+  pairwise ~ food_type,
+  var = "hungry_s"
+)
+
+# get approximate effect size
+r.squaredGLMM(exp_attr_hunger_food)
+```
+
 # 5. Write final files
 
 Last, I write the final analysis files.
@@ -3014,7 +3070,8 @@ save(
   exp_attr_meat, 
   exp_sim_meat, 
   exp_attr_meat_labels, 
-  exp_sim_meat_labels, 
+  exp_sim_meat_labels,
+  exp_attr_hunger_food,
   file = here("plots", "models", "models.RData")
 )
 
@@ -3026,7 +3083,6 @@ write_csv(attractiveness, here("data", "study2", "attractiveness.csv"))
 
 # simulations only
 write_csv(simulations, here("data", "study2", "simulations.csv"))
-
 ```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
