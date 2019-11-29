@@ -2582,6 +2582,7 @@ h4_attr_p <- mixed(
 )
 
 summary(h4_attr_p)
+anova(h4_attr_p)
 
 # simple slopes
 emtrends(

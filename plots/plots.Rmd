@@ -121,6 +121,94 @@ GeomFlatViolin <-
   )
 
 ### FUNCTION 2###
+# function for a raincloud plot with different variables on the y-axis
+rc_plot <- function(
+  df,
+  variable,
+  xgroup_n,
+  xgroup,
+  ylab
+) {
+
+    # first get summary statistics plus CI
+  summary_stats <-
+    summarySE(
+      data = df,
+      measurevar = variable,
+      groupvars = "food_type"
+    ) %>% 
+    mutate( # recreate "numeric" factor (see description raincloud plots)
+      food_type_n = case_when(
+      food_type == "meat_based" ~ 1,
+      food_type == "vegan" ~ 2,
+      food_type =="vegetarian" ~ 3
+      ),
+      food_type_n = as.factor(food_type_n)
+    )
+  
+  # get plot
+  p <-
+    ggplot(
+      study1,
+      aes_string(
+        x = xgroup_n,
+        y = variable,
+        fill = xgroup
+      )
+    ) +
+    geom_flat_violin(position = position_nudge(x = 0.05, # move the cloud a bit to the right
+                                               y = 0),
+                     adjust = 1.5,
+                     trim = FALSE,
+                     alpha = 0.5,
+                     color = NA) +
+    geom_point(aes_string(x = df %>% pull(xgroup_n) %>% as.numeric() -.15, # transfer the factor to number so that I can move the rain to the left with the -.2
+                   color = xgroup,
+                   y = variable),
+               position = position_jitter(width = .10),
+               size = 1.2,
+               alpha = 0.4) +
+    geom_point( # the mean
+      data = summary_stats,
+      aes_string(
+        x = summary_stats %>% pull(xgroup_n) %>% as.numeric() -.25, # same as above, moving it a bit to the left to be right between cloud and rain
+        y = variable,
+        color = xgroup
+      ),
+      position = position_nudge(.25),
+      size = 3
+    ) +
+    geom_errorbar( # error bars
+      data = summary_stats,
+      aes(
+        x = get(xgroup_n) %>% as.numeric() - .25,
+        y = get(variable),
+        ymin = get(variable) - ci,
+        ymax = get(variable) + ci,
+        color = get(xgroup)
+      ),
+      position = position_nudge(.25),
+      width = 0.00,
+      size = 0.8
+    ) +
+    ylim(c(-.002,1)) + # to not cut off points with jitter
+    ylab(ylab) +
+    xlab("Food Type") +
+    scale_x_discrete(labels = c("Meat-based", "Vegan","Vegatarian")) + # rename the x axis after transforming it to numeric earlier
+    scale_color_brewer(palette = "Set2") +
+    scale_fill_brewer(palette = "Set2") +
+    theme_cowplot() +
+    theme(
+      text = element_text(
+        family="Century Gothic" # change font
+      ),
+      legend.position = "none" # remove legend
+    )
+  
+  return(p)
+}
+
+### FUNCTION 3 ###
 # this function gets effects from mixed effects models and plots them
 
 # helper function that get the effects at 5000 values of the predictor and turns them into a tibble
@@ -244,36 +332,330 @@ interaction_plot <-
       scale_fill_brewer(palette = "Set2") +
       theme(
         text = element_text(
-          family="Century Gothic", # change font
-          size = 40
+          family="Century Gothic" # change font
         ),
         strip.background.x = element_blank(),
-        axis.text.x = element_text(
-          size = 30
-        ),
-        legend.title = element_text(
-          size = 30
-        ),
-        legend.text = element_text(
-          size = 30
-        )
       ) +
       facet_wrap(~ measure)
   }
 ```
 
-# 1. Load and prepare data
+# 1. Study 1
 
-Next, I load the final data files.
-I saved those at the end of the analysis report (`analysis_report.Rmd`).
-```{r get_data}
-dat <- read_csv(here("data", "analysis_file.csv"))
-attractiveness <- read_csv(here("data", "attractiveness.csv"))
-simulations <- read_csv(here("data", "simulations.csv"))
+## 1.1 Load data
+First, I load the analysis file from Study 1.
+I saved it at the end of `analysis_report_study1.Rmd`.
+```{r get_data_study1}
+study1 <- read_csv(here("data", "study1", "analysis_file.csv"))
 
 # reintroduce factors
-dat <- 
-  dat %>% 
+study1 <-
+  study1 %>%
+  mutate_at(
+    vars(food_id:food_type),
+    list(~ as.factor(.))
+  )
+```
+
+Now on to the producing the raincloud plots for the proportions of feature categories by food type.
+To get the points (aka the rain) to fall left of the x-axis mark, the authors recommend to recode the factor on the x-axis to numbers, and then use that number to "move" the points.
+```{r factors_to_numbers_study1}
+study1 <-
+  study1 %>% 
+  mutate(
+    food_type_n = case_when(
+      food_type == "meat_based" ~ 1,
+      food_type == "vegan" ~ 2,
+      food_type =="vegetarian" ~ 3
+    ),
+    food_type_n = as.factor(food_type_n)
+  )
+```
+
+## 1.2 Raincloud plots
+
+For means with 95%CI, I also need the summary statistics between-subject standard errors.
+I'll get those with the `Rmisc` package.
+Note that I integrated this part into a function; thus not run.
+```{r get_summary_sensory, eval=FALSE}
+# then get summary stats
+sensory_stats_study1 <-
+  summarySE(
+    data = study1,
+    measurevar = "sensory_proportion",
+    groupvars = "food_type"
+  ) %>% 
+  mutate( # same as above
+  food_type_n = case_when(
+    food_type == "meat_based" ~ 1,
+    food_type == "vegan" ~ 2,
+    food_type =="vegetarian" ~ 3
+  ),
+  food_type_n = as.factor(food_type_n)
+)
+```
+
+Next, the raincloud plots.
+I followed [this](https://peerj.com/preprints/27137v1/) tutorial paper.
+I turned the code below into a function; thus not run.
+```{r make_it_rain_study1, eval=FALSE}
+rc_plot <-
+  ggplot(
+    study1,
+    aes(
+      x = food_type_n,
+      y = sensory_proportion,
+      fill = food_type,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = 0.05, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(food_type_n)-.15, # transfer the factor to number so that I can move the rain to the left with the -.2
+                 color = food_type,
+                 y = sensory_proportion),
+             position = position_jitter(width = .1),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = sensory_stats_study1,
+    aes(
+      x = as.numeric(food_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = sensory_proportion,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = sensory_stats_study1,
+    aes(
+      x = as.numeric(food_type_n)-.25,
+      y = sensory_proportion,
+      ymin = sensory_proportion - ci,
+      ymax = sensory_proportion + ci,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    width = 0.02,
+    size = 0.8
+  ) +
+  ylim(c(-.002,1)) + # to not cut off points with jitter
+  ylab("Proportion of Sensory Features") +
+  xlab("Food Type") +
+  scale_x_discrete(labels = c("Meat-based", "Vegan","Vegatarian")) + # rename the x axis after transforming it to numeric earlier
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic" # change font
+    ),
+    legend.position = "none"
+  )
+
+rc_plot
+```
+
+Start with sensory and action features.
+```{r sensory_rain}
+sensory_plot <-
+  rc_plot(study1,
+          "sensory_proportion",
+          "food_type_n",
+          "food_type",
+          "Proportion of Sensory Features")
+
+sensory_plot
+```
+
+Next the entire category of consumption features.
+```{r consumption_rain}
+consumption_plot <-
+  rc_plot(study1,
+          "consumption_proportion",
+          "food_type_n",
+          "food_type",
+          "Proportion of Consumption Features")
+
+consumption_plot
+```
+
+And non-consumption features.
+```{r non_consumption_rain}
+non_consumption_plot <-
+  rc_plot(study1,
+          "non_consumption_proportion",
+          "food_type_n",
+          "food_type",
+          "Proportion of Non-Consumption Features")
+
+non_consumption_plot
+```
+
+And consumption-independent features.
+```{r consumption_independent_rain}
+situation_independent_plot <-
+  rc_plot(study1,
+          "situation_independent_proportion",
+          "food_type_n",
+          "food_type",
+          "Proportion of Situation-Independent Features")
+
+situation_independent_plot
+```
+
+
+Alternatively, I'd like to have the three categories shown per food type.
+For that purpose, I need to restructure the data (into long format), so I can facet wrap the plots.
+Also, I need summary stats, this time with with-person standard error because there are multiple measurements of proportions per food type.
+```{r get_summary_proportion_type}
+# turn into long format
+study1_long <-
+  study1 %>% 
+  select(
+    food_id,
+    food_type,
+    consumption_proportion,
+    non_consumption_proportion,
+    situation_independent_proportion
+  ) %>% 
+  # turn into long format
+  pivot_longer(
+    cols = c(-food_id, -food_type),
+    names_to = c("proportion_type", ".value"),
+    names_sep = "_(?!.*_)"
+  ) %>% 
+  mutate( # for raincloud
+    proportion_type_n = case_when(
+      proportion_type == "consumption" ~ 1,
+      proportion_type == "non_consumption" ~ 2,
+      proportion_type == "situation_independent" ~ 3
+    ),
+    proportion_type = as.factor(proportion_type),
+    proportion_type = recode(
+      proportion_type,
+      "consumption" = "Consumption",
+      "non_consumption" = "Non-consumption",
+      "situation_independent" = "Situation independent"
+    ),
+    food_type = recode(
+      food_type,
+      "meat_based" = "Meat-based",
+      "vegan" = "Vegan",
+      "vegetarian" = "Vegetarian"
+    )
+  )
+
+summary_stats_study1 <-
+  summarySEwithin(
+    data = study1_long,
+    measurevar = "proportion",
+    withinvars = c("proportion_type"),
+    betweenvars = c("food_type"),
+    idvar = "food_id"
+  ) %>% 
+  mutate( # for raincloud
+    proportion_type_n = case_when(
+      proportion_type == "Consumption" ~ 1,
+      proportion_type == "Non-consumption" ~ 2,
+      proportion_type == "Situation independent" ~ 3
+    ),
+    food_type = recode(
+      food_type,
+      "meat_based" = "Meat-based",
+      "vegan" = "Vegan",
+      "vegetarian" = "Vegetarian"
+    )
+  )
+```
+
+Next the raincloud plot.
+```{r make_it_rain_study1_proportion_types}
+food_type_plot <-
+  ggplot(
+    study1_long,
+    aes(
+      x = proportion_type_n,
+      y = proportion,
+      fill = proportion_type,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = .1, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(proportion_type_n)-.2, # transfer the factor to number so that I can move the rain to the left with the -
+                 color = proportion_type,
+                 y = proportion),
+             position = position_jitter(width = .1),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = summary_stats_study1,
+    aes(
+      x = as.numeric(proportion_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = proportion,
+      color = proportion_type
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = summary_stats_study1,
+    aes(
+      x = as.numeric(proportion_type_n)-.25,
+      y = proportion,
+      ymin = proportion - ci,
+      ymax = proportion + ci,
+      color = proportion_type
+    ),
+    position = position_nudge(.25),
+    width = 0.00,
+    size = 0.8
+  ) +
+  ylim(c(-.002,1.002)) + # to not cut off points with jitter
+  xlab("Food Type") +
+  ylab("Proportion") +
+  labs(fill = "Proportion Type", # otherwise I get two legends
+       color = "Proportion Type") +
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic" # change font
+    ),
+    strip.background.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  facet_wrap(~ food_type)
+
+food_type_plot
+```
+
+
+# 2. Study 2
+
+## 2.1 Load and prepare data
+
+Next, I load the final data files from Study 2.
+I saved those at the end of the analysis report (`analysis_report_study2.Rmd`).
+```{r factors_to_numbers_study2}
+study2 <- read_csv(here("data", "study2", "analysis_file.csv"))
+attractiveness <- read_csv(here("data", "study2", "attractiveness.csv"))
+simulations <- read_csv(here("data", "study2", "simulations.csv"))
+
+# reintroduce factors
+study2 <- 
+  study2 %>% 
   mutate_at(
     vars(pp, measure, food_type, label_type),
     list(~ as.factor(.))
@@ -281,23 +663,25 @@ dat <-
 ```
 
 Now on to producing the 2x2 raincloud plot.
-To get the points (aka the rain) to fall left of the x-axis mark, the authors recommend to recode the factor on the x-axis to numbers, and then use that number to "move" the points.
-```{r}
-dat <-
-  dat %>% 
+I rcode the factor just like above.
+```{r numeric_factor_study2}
+study2 <-
+  study2 %>% 
   mutate(
     label_type_n = if_else(label_type == "control", 1, 2),
     label_type_n = as.factor(label_type_n)
   )
 ```
 
+## 2.2 Raincloud plots
+
 For means with 95%CI, I also need the summary statistics with within-subject standard errors.
 I'll get those with the `Rmisc` package.
 Note that I aggregate per participant first to make the CIs comparable to a repeated-measures ANOVA.
-```{r get_summary}
+```{r get_summary_study2}
 # aggregate first
 aggregated <- 
-  dat %>% 
+  study2 %>% 
   group_by(pp, label_type, food_type, measure) %>% 
   summarize(
     rating = mean(rating, na.rm = TRUE)
@@ -324,14 +708,11 @@ summary_stats <- summarySEwithin(
     )
 ```
 
-# 2. Raincloud plot
-
 Next, the raincloud plot.
-I followed [this](https://peerj.com/preprints/27137v1/) tutorial paper.
 ```{r make_it_rain}
-rc_plot <-
+rc_plot_study2 <-
   ggplot(
-    dat %>% 
+    study2 %>% 
       mutate(
         food_type = recode( # rename factor levels
           food_type,
@@ -382,7 +763,7 @@ rc_plot <-
       color = food_type
     ),
     position = position_nudge(.25),
-    width = 0.02,
+    width = 0.00,
     size = 0.8
   ) +
   geom_line( # line connecting the means per group
@@ -407,26 +788,16 @@ rc_plot <-
   theme_cowplot() +
   theme(
     text = element_text(
-      family="Century Gothic", # change font
-      size = 40
+      family="Century Gothic" # change font
     ), 
-    strip.background.x = element_blank(),
-    axis.text.x = element_text(
-      size = 30
-    ),
-    legend.title = element_text(
-      size = 30
-    ),
-    legend.text = element_text(
-      size = 30
-    )
+    strip.background.x = element_blank()
   ) + 
   facet_grid(. ~ measure)
 
-rc_plot
+rc_plot_study2
 ```
 
-# 3. Interaction plots
+## 2.3 Interaction plots
 
 Next, I plot the interactions between categorical and numerical variables.
 Contrary to the raincloud plots, where I plotted the raw data, the interaction plots are meant to illustrate the simple slope analyses.
@@ -434,7 +805,7 @@ When plotting the raw data with a fitted line, this line will be fitted with `lm
 Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted.
 ```{r interaction_plots_simple}
 # with simple slope and lm method (without SEs, because they'd be wrong)
-ggplot(dat %>% 
+ggplot(study2 %>% 
          filter(measure == "attractiveness"),
        aes(
          x = change_diet, 
@@ -577,26 +948,51 @@ exp_meat_label_plot <-
 exp_meat_label_plot
 ```
 
-# 4. Save plots
-```{r save_plots, eval=F}
-# raincloud
-tiff(here("plots", "raincloud.tiff"), width = 1732, height = 1266, units = "px", res = 300)
-rc_plot
+# 3. Save plots
+```{r save_plots, eval=T}
+# study1 sensory
+ggsave(here("plots", "sensory_raincloud.tiff"),
+       plot = sensory_plot,
+       dpi = 600)
+
+# study1 consumption
+ggsave(here("plots", "consumption_raincloud.tiff"),
+       plot = consumption_plot,
+       dpi = 600)
+
+# study1 non-consumption
+ggsave(here("plots", "non_consumption_raincloud.tiff"),
+       plot = non_consumption_plot,
+       dpi = 600)
+
+# study1 situation independent
+ggsave(here("plots", "situation_independent_raincloud.tiff"),
+       plot = situation_independent_plot,
+       dpi = 600)
+
+# study1 by food type
+tiff(here("plots", "food_type_raincloud.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
+food_type_plot
 dev.off()
 
-# first interaction plot: H4
-tiff(here("plots", "h4_plot.tiff"), width = 1732, height = 1266, units = "px", res = 300)
-h4_plot
+# study 2 raincloud
+tiff(here("plots", "study2_raincloud.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+rc_plot_study2
 dev.off()
 
-# exploratory plot 1
-tiff(here("plots", "frequency_meat_food_types.tiff"), width = 1732, height = 1266, units = "px", res = 300)
-exp_meat_plot
-dev.off()
+# study 2 interaction h4
+ggsave(here("plots", "h4_plot.tiff"),
+       plot = h4_plot,
+       dpi = 600)
 
-# exploratory plot 2
-tiff(here("plots", "frequency_meat_food_labels.tiff"), width = 1732, height = 1266, units = "px", res = 300)
-exp_meat_label_plot
-dev.off()
+# study 2 exploratory plot 1
+ggsave(here("plots", "frequency_meat_food_type.tiff"),
+       plot = exp_meat_plot,
+       dpi = 600)
+
+# study 2 exploratory plot 2
+ggsave(here("plots", "frequency_meat_food_labels.tiff"),
+       plot = exp_meat_label_plot,
+       dpi = 600)
 ```
 

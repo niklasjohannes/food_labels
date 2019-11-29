@@ -27,17 +27,124 @@ library(pacman)
 p_load(
   here,
   janitor,
+  pastecs,
+  betareg,
+  car,
+  lattice,
+  cowplot,
   tidyverse
 )
 
 # set seed
 set.seed(42)
+
+# set theme
+theme_set(theme_cowplot())
 ```
 
 ```{r custom_functions}
+### FUNCTION 1 ###
+# little function that describes and visualizes variables, either for repeated-measures or trait-like
+describe_visualize <- 
+  function(df, 
+           variable, 
+           repeated_measure = FALSE,
+           want_summary = FALSE){
+    
+    variable <- enquo(variable)
+    
+    # specifies whether the variable we want to plot is a trait-like or repeated measure
+    if (repeated_measure == FALSE){
+      df <-
+        df %>%
+        group_by(food) %>%
+        slice(1) %>% 
+        ungroup()
+    } else {
+      df <-
+        df
+    }
+    
+    # descriptive stats
+    sum_stats <-
+      df %>% 
+      pull(!! variable) %>% 
+      stat.desc()
+    
+    # plot
+    plot <-
+      ggplot(df, aes(x = !! variable)) +
+        geom_density(color = "darkgrey", fill = "darkgrey") +
+        geom_point(aes(x = !! variable, y = 0))
+    
+    # return the two (if both are wanted)
+    if(want_summary == TRUE){
+      return(list(knitr::kable(sum_stats), plot))
+    } else{
+      return(plot)
+    }
+  }
 
+### FUNCTION 2 ###
+# function to produce violin plots for a variable for each food type
+three_violins <-
+  function(
+    df,
+    variable
+  ){
+    
+    variable <- enquo(variable)
+    
+    df <-
+      df %>% 
+      group_by(food) %>% 
+      slice(1) %>% 
+      ungroup()
+    
+    ggplot(
+      df,
+      aes(
+        x = food_type,
+        y = !! variable,
+        color = food_type,
+        fill = food_type
+      )
+    ) +
+      geom_violin() +
+      scale_color_brewer(palette = "Dark2") +
+      scale_fill_brewer(palette = "Dark2")
+  }
+
+### FUNCTION 3###
+# provides summary statistics for a variable for each food type
+summary_stats <-
+  function(
+    df,
+    variable
+  ){
+    variable <- enquo(variable)
+    
+    summary_stats <-
+      df %>%
+      group_by(food_type) %>%
+      summarize(mean = mean(!! variable),
+                sd = sd(!! variable))
+    
+    summary_stats
+  }
+
+### FUNCTION 4 ###
+# applies the betareg transformation
+betareg_transformation <-
+  function(
+    value
+  ) {
+    n <- length(unique(analysis_file$food))
+    
+    value <-
+      (value * (n - 1) + 0.5) / n
+  }
 ```
-
 
 # 1. Load data and wrangle data
 First, we load the data.
@@ -46,6 +153,17 @@ For a codebook, see the [enter file name] file.
 raw_data <- read_csv(
   here("data", "study1", "raw_data.csv")
   )
+
+### FUNCTION 5 ###
+# arranges cook's distance from highest to lowest
+arrange_cook <-
+  function(outliers, grouping_factor){
+    cooks.distance(outliers) %>% 
+      as_tibble(rownames = as.character(grouping_factor)) %>%
+      rename(cooks_distance = value) %>% 
+      arrange(desc(cooks_distance)) %>% 
+      head()
+  }
 ```
 
 The variable names aren't in a nice format.
@@ -251,14 +369,28 @@ working_file <-
       vars(contains("food"), feature),
       list(~ as.factor(.))
     )
+
+# summary stats
+working_file %>% 
+  group_by(food) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  summarize_at(
+    vars(
+      sensory_proportion,
+      positive_proportion,
+      contextual_proportion
+    ),
+    list(mean = mean, median = median, sd = sd)
+  )
 ```
 
 # 2. Describe and visualize
 Next, I visualize the different variables.
-I'll start with the total number of features per foood.
+I'll start with the total number of features overall and per food.
 Overall, it looks skewed with a long left tail, but without a really clear visual outlier.
 ```{r visualize_totals_per_food}
-# number of features per food
+# number of features per food and feature type
 ggplot(
   data = working_file,
   aes(
@@ -270,7 +402,7 @@ ggplot(
     stat = "identity"
   )
 
-# distribution of features per food
+# distribution of total features
 ggplot(data = working_file %>% group_by(food) %>% slice(1),
        aes(
          x = total
@@ -280,6 +412,9 @@ ggplot(data = working_file %>% group_by(food) %>% slice(1),
 
 # summary stats
 working_file %>%
+  group_by(food) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
   pull(total) %>% 
   stat.desc()
 ```
@@ -330,7 +465,7 @@ working_file %>%
   group_by(food) %>% 
   slice(1) %>% 
   ungroup() %>% 
-  # turn into wide format for pivoting later
+  # turn into long format for faceting later
   pivot_longer(
     cols = c(-food_id, -food),
     names_to = c("feature_type", ".value"),
@@ -341,7 +476,12 @@ working_file %>%
   ) +
   geom_density(color = "darkgrey", fill = "darkgrey") + 
   facet_wrap(~ feature_type)
-  
+```
+
+Now per food type.
+```{r visualize_totals_per_food_type}
+three_violins(working_file, total)
+summary_stats(working_file, total)
 ```
 
 Alright, next I visualize the three main feature categories by food category, starting with consumption features.
@@ -378,4 +518,426 @@ Contexutal features.
 ```{r contextual_by_food_type}
 three_violins(working_file, contextual_proportion)
 summary_stats(working_file, contextual_proportion)
+```
+
+# 3. Analysis
+
+## 3.1 Confirmatory
+
+Next, I see whether there are differences between the food categories on the proportions of features.
+We had one hypothesis: Meat-based foods will have more sensory and action features than vegan or vegetarian foods.
+
+First: an analysis file that only contains one line per food.
+```{r analysis_file}
+analysis_file <-
+  working_file %>% 
+  group_by(food) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(-feature) %>% 
+  arrange(food_id)
+```
+
+We are analyzing proportions, meaning that a general linear model assuming a Gaussian distribution will most likely lead to biased effects. 
+However, inspecting the proportions shows that most of them are following a binomial or beta distribution.
+
+Usually, I would rely on a binomial linear model, but in this case I believe a beta regression model is more appropriate.
+These models are used when we won't know before-hand how many total "trials" (aka total number of features for each food) there are.
+For this, I use the `betareg` package.
+
+Note that the `betareg` command assumes that all observations are between 0 and 1
+In my case, many are exactly 0.
+The authors [suggest](https://cran.r-project.org/web/packages/betareg/vignettes/betareg.pdf) to apply a transformation in this case.
+
+The model diagnostics are relatively poor.
+I will run the same analysis as a binomial model and compare.
+```{r sensory_model_all}
+# apply transformation function
+analysis_file <-
+  analysis_file %>%
+  mutate(
+    sensory_proportion_t = unlist(map(sensory_proportion, betareg_transformation))
+  )
+
+# set contrasts
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+# check contrasts
+contrasts(analysis_file$food_type)
+
+# run analysis
+sensory_model <-
+  betareg(
+    sensory_proportion_t ~
+      food_type,
+    analysis_file
+  )
+
+# summary
+summary(sensory_model)
+
+# inspect model
+plot(sensory_model)
+
+# residuals
+densityplot(resid(sensory_model, scaled = TRUE))
+
+# qqplot
+car::qqPlot(resid(sensory_model, scaled = TRUE))
+
+# check for formal outliers
+arrange_cook(sensory_model, "food_id")
+```
+
+
+I run an additional binomial model, which might be better suited to deal with the data distribution.
+The differences are significant, and the model diagnostics look much better, particularly the qq-plot.
+I'd say we can trust the effects.
+
+I'll use binomial models from here on.
+Food `12` stands out in comparison to the rest, so I'll see whether the exclusion of this data point changes the results later.
+```{r sensory_binomial}
+# binomial
+sensory_model_bi <-
+  glm(
+    cbind(sensory_total, total-sensory_total) ~
+      food_type,
+    data = analysis_file,
+    family = binomial(logit)
+  )
+
+# summary
+summary(sensory_model_bi)
+
+# model diagnostics
+plot(sensory_model_bi)
+
+# residuals
+densityplot(resid(sensory_model_bi, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(sensory_model_bi, "food_id")
+```
+
+But first I'll run a model excluding meat-based foods to see whether the difference between vegan and vegetarian is significant.
+It is not.
+```{r sensory_model_no_meat}
+# binomial
+sensory_model_bi2 <-
+  glm(
+    cbind(sensory_total, total-sensory_total) ~
+      food_type,
+    data = analysis_file %>% filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(sensory_model_bi2)
+
+# model diagnostics
+plot(sensory_model_bi2)
+
+# residuals
+densityplot(resid(sensory_model_bi2, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(sensory_model_bi2, "food_id")
+
+# effect size
+sos::findFn(sensory_model_bi)
+```
+
+## 3.2 Exploratory
+
+### 3.2.1 Sensory
+First, I want to make sure the difference is indeed robust to the exclusion of outliers.
+I'll exclude the three potentially influential cases.
+
+The differences remain significant.
+```{r sensory_model_no_outliers}
+# binomial
+sensory_model_bi_no_outliers <-
+  glm(
+    cbind(sensory_total, total-sensory_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("12")),
+    family = binomial(logit)
+  )
+
+# summary
+summary(sensory_model_bi_no_outliers)
+```
+
+### 3.2.2 Consumption
+Next, I'd like to explore whether there are any differences between food types on the three main situation categories.
+Just like above, I'll start with consumption features.
+
+The model fit is good.
+There's a significant difference between meat-based and vegetarian foods, but not between meat-based an vegan.
+
+Again, food `12` shows up as an outlier. 
+I expected food `199`, which has 100% consumption features, to show up, but it doesn't.
+I'll exclude both in the robustness check just to make sure the difference is not driven by model outlier or raw data outlier.
+```{r consumption_binomial}
+# binomial
+consumption_model_bi <-
+  glm(
+    cbind(consumption_total, total-consumption_total) ~
+      food_type,
+    data = analysis_file,
+    family = binomial(logit)
+  )
+
+# summary
+summary(consumption_model_bi)
+
+# model diagnostics
+plot(consumption_model_bi)
+
+# residuals
+densityplot(resid(consumption_model_bi, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(consumption_model_bi, "food_id")
+```
+
+Run a model excluding meat-based foods to see whether the difference between vegan and vegetarian is significant.
+It is.
+```{r consumption_model_no_meat}
+# binomial
+consumption_model_bi2 <-
+  glm(
+    cbind(consumption_total, total-consumption_total) ~
+      food_type,
+    data = analysis_file %>% filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(consumption_model_bi2)
+
+# model diagnostics
+plot(consumption_model_bi2)
+
+# residuals
+densityplot(resid(consumption_model_bi2, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(consumption_model_bi2, "food_id")
+```
+
+Now I check whether the effects in those two models are robust to outlier exclusion.
+They are.
+```{r consumption_model_no_outliers}
+# binomial
+consumption_model_bi_no_outliers <-
+  glm(
+    cbind(consumption_total, total-consumption_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("12", "199")),
+    family = binomial(logit)
+  )
+
+# summary
+summary(consumption_model_bi_no_outliers)
+
+# binomial
+consumption_model_bi2_no_outliers <-
+  glm(
+    cbind(consumption_total, total-consumption_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("12")) %>% 
+      filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(consumption_model_bi2_no_outliers)
+```
+
+### 3.2.3 Non-consumption
+
+I'll continue with non-consumption features.
+
+The model fit is good.
+There's a significant difference between meat-based and vegan foods, but not between meat-based an vegetarian, which mirrors the results for consumption features.
+
+Foods `150`, `9`, and `180` could potentially be influential, so I'll remove them in a robustness check.
+```{r non_consumption_binomial}
+# binomial
+non_consumption_model_bi <-
+  glm(
+    cbind(non_consumption_total, total-non_consumption_total) ~
+      food_type,
+    data = analysis_file,
+    family = binomial(logit)
+  )
+
+# summary
+summary(non_consumption_model_bi)
+
+# model diagnostics
+plot(non_consumption_model_bi)
+
+# residuals
+densityplot(resid(non_consumption_model_bi, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(non_consumption_model_bi, "food_id")
+```
+
+Run a model excluding meat-based foods to see whether the difference between vegan and vegetarian is significant.
+It is.
+
+Foods `150` and `9` agains stick out.
+```{r non_consumption_model_no_meat}
+# binomial
+non_consumption_model_bi2 <-
+  glm(
+    cbind(non_consumption_total, total-non_consumption_total) ~
+      food_type,
+    data = analysis_file %>% filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(non_consumption_model_bi2)
+
+# model diagnostics
+plot(non_consumption_model_bi2)
+
+# residuals
+densityplot(resid(non_consumption_model_bi2, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(non_consumption_model_bi2, "food_id")
+```
+
+Now I check whether the effects in those two models are robust to outlier exclusion.
+They are.
+```{r non_non_consumption_model_no_outliers}
+# binomial
+non_consumption_model_bi_no_outliers <-
+  glm(
+    cbind(non_consumption_total, total-non_consumption_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("150", "9", "180")),
+    family = binomial(logit)
+  )
+
+# summary
+summary(non_consumption_model_bi_no_outliers)
+
+# binomial
+non_consumption_model_bi2_no_outliers <-
+  glm(
+    cbind(non_consumption_total, total-non_consumption_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("150", "9")) %>% 
+      filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(non_consumption_model_bi2_no_outliers)
+```
+
+### 3.2.3 Situation independent
+
+I'll continue with non-consumption features.
+
+The model fit is good.
+There's a significant difference between meat-based and vegetarian or vegan foods; not surprising, given that these proportions are the inverse of consumption and non-consumption features.
+
+Again, food `150` sticks out as a potential outlier.
+```{r situation_independent_binomial}
+# binomial
+situation_independent_model_bi <-
+  glm(
+    cbind(situation_independent_total, total-situation_independent_total) ~
+      food_type,
+    data = analysis_file,
+    family = binomial(logit)
+  )
+
+# summary
+summary(situation_independent_model_bi)
+
+# model diagnostics
+plot(situation_independent_model_bi)
+
+# residuals
+densityplot(resid(situation_independent_model_bi, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(situation_independent_model_bi, "food_id")
+```
+
+Like before, I run a model excluding meat-based foods to see whether the difference between vegan and vegetarian is significant.
+It is not.
+
+Food `150` again sticks out.
+```{r situation_independent_model_no_meat}
+# binomial
+situation_independent_model_bi2 <-
+  glm(
+    cbind(situation_independent_total, total-situation_independent_total) ~
+      food_type,
+    data = analysis_file %>% filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(situation_independent_model_bi2)
+
+# model diagnostics
+plot(situation_independent_model_bi2)
+
+# residuals
+densityplot(resid(situation_independent_model_bi2, scaled = TRUE))
+
+# check formal outliers
+arrange_cook(situation_independent_model_bi2, "food_id")
+```
+
+Now I check whether the effects in those two models are robust to outlier exclusion.
+They are.
+```{r non_situation_independent_model_no_outliers}
+# binomial
+situation_independent_model_bi_no_outliers <-
+  glm(
+    cbind(situation_independent_total, total-situation_independent_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("150")),
+    family = binomial(logit)
+  )
+
+# summary
+summary(situation_independent_model_bi_no_outliers)
+
+# binomial
+situation_independent_model_bi2_no_outliers <-
+  glm(
+    cbind(situation_independent_total, total-situation_independent_total) ~
+      food_type,
+    data = analysis_file %>% 
+      filter(!food_id %in% c("150")) %>% 
+      filter(food_type != "meat_based"),
+    family = binomial(logit)
+  )
+
+# summary
+summary(situation_independent_model_bi2_no_outliers)
+```
+
+# 4. Write files
+Last, I write the analysis files.
+```{r write_files}
+write_csv(analysis_file, here("data", "study1", "analysis_file.csv"))
 ```
