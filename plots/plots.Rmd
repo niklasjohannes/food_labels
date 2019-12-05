@@ -479,7 +479,7 @@ consumption_plot <-
           "consumption_proportion",
           "food_type_n",
           "food_type",
-          "Proportion of Consumption Features")
+          "Proportion of Consumption Situation Features")
 
 consumption_plot
 ```
@@ -491,7 +491,7 @@ non_consumption_plot <-
           "non_consumption_proportion",
           "food_type_n",
           "food_type",
-          "Proportion of Non-Consumption Features")
+          "Proportion of Non-Consumption Situation Features")
 
 non_consumption_plot
 ```
@@ -538,8 +538,8 @@ study1_long <-
     proportion_type = as.factor(proportion_type),
     proportion_type = recode(
       proportion_type,
-      "consumption" = "Consumption",
-      "non_consumption" = "Non-consumption",
+      "consumption" = "Consumption situation",
+      "non_consumption" = "Non-consumption situation",
       "situation_independent" = "Situation independent"
     ),
     food_type = recode(
@@ -560,8 +560,8 @@ summary_stats_study1 <-
   ) %>% 
   mutate( # for raincloud
     proportion_type_n = case_when(
-      proportion_type == "Consumption" ~ 1,
-      proportion_type == "Non-consumption" ~ 2,
+      proportion_type == "Consumption situation" ~ 1,
+      proportion_type == "Non-consumption situation" ~ 2,
       proportion_type == "Situation independent" ~ 3
     ),
     food_type = recode(
