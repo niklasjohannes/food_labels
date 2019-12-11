@@ -1749,6 +1749,59 @@ h1_attr_covariates_p <-
 anova(h1_attr_covariates_p)
 ```
 
+As a last robustness check, I see whether gender influences the effect of label type on the two outcomes.
+It does not.
+```{r h1_gender}
+# drop the one "other" entry from gender (it would lead to convergence issues)
+no_other_sim <-
+  simulations %>% 
+  filter(gender != "other") %>% 
+  mutate_at(
+    vars(pp, gender),
+    list(~ droplevels(.))
+  )
+
+no_other_attr <-
+  attractiveness %>% 
+  filter(gender != "other") %>% 
+  mutate_at(
+    vars(pp, gender),
+    list(~ droplevels(.))
+  )
+
+# set contrasts
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+# construct model for simulations
+h1_sim_gender <- mixed(
+  rating ~
+    label_type * gender + 
+    (1 + label_type | pp) +
+    (1 + label_type * gender | food),
+  no_other_sim,
+  type = 3,
+  method = "S"
+)
+
+# inspect model
+summary(h1_sim_gender)
+
+# construct model for attractiveness
+h1_attr_gender <- mixed(
+  rating ~
+    label_type * gender + 
+    (1 + label_type | pp) +
+    (1 + label_type * gender | food),
+  no_other_attr,
+  type = 3,
+  method = "S",
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+# inspect model
+summary(h1_attr_gender)
+```
+
 ## 4.2 H2: Interaction effect
 
 The preregistered hypothesis reads as follows:
@@ -2208,7 +2261,7 @@ h3_main <-
 Often, it can help to standardize continuous predictors.
 The model still throws a convergence warning, so I'll continue with the same troubleshooting steps as previously.
 ```{r h3_model_main_effects_s, warning=TRUE, error=TRUE}
-# standardize attractiveness rating
+# standardize simulation rating
 wide_data <-
   wide_data %>% 
   mutate(
@@ -2477,6 +2530,38 @@ h3_interaction_food_type <-
 summary(h3_interaction_food_type)
 anova(h3_interaction_food_type)
 ```
+
+Simulations predicted attractiveness.
+As an another exploratory analysis, I'll check whether the reverse also holds.
+With the `bobyqa` optimizer, the model converges without any warnings.
+All effects are significant.
+```{r h3_attr_simulations}
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# standardize attractiveness rating
+wide_data <-
+  wide_data %>% 
+  mutate(
+    attractiveness_rating_s = scale(attractiveness_rating, scale = TRUE)
+  )
+
+# run the model
+h3_attr_sim <-
+  mixed(
+    simulation_rating ~
+      attractiveness_rating_s + label_type + food_type +
+      (1 + attractiveness_rating_s + label_type + food_type | pp) +
+      (1 + attractiveness_rating_s + label_type | food),
+    wide_data,
+    type = 3,
+    method = "S",
+    control = lmerControl(optimizer = "bobyqa")
+  )
+
+summary(h3_attr_sim)
+```
+
 
 ## H4: Intention to reduce meat
 The preregistered hypothesis reads as follows:
