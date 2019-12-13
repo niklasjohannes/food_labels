@@ -2256,6 +2256,17 @@ h3_main <-
       (1 + simulation_rating_c + label_type | food),
     wide_data
   )
+
+sim_attr <- 
+  lme4::lmer(
+    attractiveness_rating_s ~
+      simulation_rating_s +
+      (1 + simulation_rating_s | pp) +
+      (1 + simulation_rating_s | food),
+    wide_data
+  )
+
+summary(sim_attr)
 ```
 
 Often, it can help to standardize continuous predictors.
@@ -3216,5 +3227,81 @@ write_csv(attractiveness, here("data", "study2", "attractiveness.csv"))
 # simulations only
 write_csv(simulations, here("data", "study2", "simulations.csv"))
 ```
+
+```{r}
+### sobel test simulations predicting attractiveness
+
+# labels predicting attractiveness
+label_attr <- lme4::lmer(
+  attractiveness_rating_s ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  wide_data
+)
+
+summary(label_attr)
+
+# simulations predicting attractiveness
+sim_attr <- 
+  lme4::lmer(
+    attractiveness_rating_s ~
+      simulation_rating_s +
+      (1 + simulation_rating_s | pp) +
+      (1 + simulation_rating_s | food),
+    wide_data
+  )
+
+summary(sim_attr)
+
+# simulations and labels predicting attractiveness
+sim_attr_label <- 
+  lme4::lmer(
+    attractiveness_rating_s ~
+      simulation_rating_s + label_type +
+      (1 + simulation_rating_s + label_type | pp) +
+      (1 + simulation_rating_s + label_type | food),
+    wide_data
+  )
+
+### sobel test attractiveness predicting simulations
+
+# labels predicting simulations
+label_sim <- lme4::lmer(
+  simulation_rating_s ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  wide_data
+)
+
+summary(label_sim)
+
+# attractiveness predicting simulations
+attr_sim <- 
+  lme4::lmer(
+    simulation_rating_s ~
+      attractiveness_rating_s +
+      (1 + attractiveness_rating_s | pp) +
+      (1 + attractiveness_rating_s | food),
+    wide_data
+  )
+
+summary(attr_sim)
+
+# attractiveness and labels predicting simulations
+attr_sim_label <- 
+  lme4::lmer(
+    simulation_rating_s ~
+      attractiveness_rating_s + label_type +
+      (1 + attractiveness_rating_s + label_type | pp) +
+      (1 + attractiveness_rating_s + label_type | food),
+    wide_data,
+    control = lmerControl(optimizer = "bobyqa")
+  )
+
+summary(attr_sim_label)
+```
+
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>

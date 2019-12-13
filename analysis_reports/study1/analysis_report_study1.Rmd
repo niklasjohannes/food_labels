@@ -144,15 +144,7 @@ betareg_transformation <-
     value <-
       (value * (n - 1) + 0.5) / n
   }
-```
 
-# 1. Load data and wrangle data
-First, we load the data.
-For a codebook, see the [enter file name] file.
-```{r load_data}
-raw_data <- read_csv(
-  here("data", "study1", "raw_data.csv")
-  )
 
 ### FUNCTION 5 ###
 # arranges cook's distance from highest to lowest
@@ -164,6 +156,15 @@ arrange_cook <-
       arrange(desc(cooks_distance)) %>% 
       head()
   }
+```
+
+# 1. Load data and wrangle data
+First, we load the data.
+For a codebook, see the [enter file name] file.
+```{r load_data}
+raw_data <- read_csv(
+  here("data", "study1", "raw_data.csv")
+  )
 ```
 
 The variable names aren't in a nice format.
