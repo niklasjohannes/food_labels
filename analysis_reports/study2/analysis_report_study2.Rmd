@@ -2574,15 +2574,13 @@ summary(h3_attr_sim)
 ```
 
 
-## H4: Intention to reduce meat
+## 4.4 H4: Intention to reduce meat
 The preregistered hypothesis reads as follows:
->The intention to reduce meat will be associated positively with attractiveness ratings for the plant-based foods, and negatively with desire (sic: simulations) for meat-based foods.
+>The intention to reduce meat will be associated positively with attractiveness ratings for the plant-based foods, and negatively with desire (sic: attractiveness) for meat-based foods.
 
-For this hypothesis, I run two interaction models, predicting attractiveness and simulations from the interaction of `food_type` and intention to reduce meat eating (`change_diet`).
+For this hypothesis, I run an interaction model, predicting attractiveness from the interaction of `food_type` and intention to reduce meat eating (`change_diet`).
 
-### 4.1 Confirmatory
-
-#### 4.1.1 Attractiveness
+### 4.4.1 Confirmatory
 
 Indeed, there is a positive raw relation between the intention to reduce eating meat and attractiveness ratings for plant-based foods.
 For meat-based foods, this relation looks flat.
@@ -2691,115 +2689,10 @@ emtrends(
 r.squaredGLMM(h4_attr)
 ```
 
-#### 4.1.2 Simulations
-
-In the simulation model, we see the opposite of the hypothesis: There is a **stronger** positive raw association for plant-based compared to meat-based foods, and meat-based foods evoke stronger simulations overall.
-```{r h4_sim_model}
-# standardize intention to eat meat
-simulations <-
-  simulations %>% 
-  mutate(
-    change_diet_s = scale(change_diet, scale = TRUE)
-  )
-
-# plot
-ggplot(simulations,
-       aes(
-         x = change_diet_s, 
-         y = rating
-        )
-      )+ 
-  geom_smooth(method = "lm", aes(color = food_type)) +
-  ylim(0, 100)
-
-# set contrasts
-options(contrasts = c("contr.sum", "contr.poly"))
-
-# construct model
-h4_sim <- lme4::lmer(
-  rating ~
-    change_diet_s * food_type +
-    (1 + food_type | pp) +
-    (1 | food),
-  simulations
-)
-
-# inspect model
-summary(h4_sim)
-```
-
-`pp_103` is a potential influential case.
-There are three potential outliers in foods: `vegan_fillets`, `haddock`, `salsa_pizza`.
-```{r h4_sim_model_diagnostics}
-# inspect standardized residuals
-densityplot(resid(h4_sim, scaled = TRUE))
-
-# q-q plot
-car::qqPlot(resid(h4_sim, scaled = TRUE))
-
-# proportion of residuals in the extremes of the distribution
-lmer_residuals(h4_sim)
-
-# obtain outliers
-h4_sim_outliers_pp <- influence.ME::influence(h4_sim, c("pp"))
-h4_sim_outliers_food <- influence.ME::influence(h4_sim, c("food"))
-
-# plot formal outliers for pp
-plot(h4_sim_outliers_pp, which = 'cook')
-plot(h4_sim_outliers_pp, which = 'dfbetas')[1]
-plot(h4_sim_outliers_pp, which = 'dfbetas')[2]
-plot(h4_sim_outliers_pp, which = 'dfbetas')[3]
-plot(h4_sim_outliers_pp, which = 'dfbetas')[4]
-
-# which ones are the highest
-arrange_cook(h4_sim_outliers_pp, "pp")
-
-# plot formal outliers for food
-plot(h4_sim_outliers_food, which = 'cook')
-plot(h4_sim_outliers_food, which = 'dfbetas')[1]
-plot(h4_sim_outliers_food, which = 'dfbetas')[2]
-plot(h4_sim_outliers_food, which = 'dfbetas')[3]
-plot(h4_sim_outliers_food, which = 'dfbetas')[4]
-
-# which ones are so far out on cook's distance?
-arrange_cook(h4_sim_outliers_food, "food")
-
-# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
-plot(h4_sim, type = c('p', 'smooth'))
-```
-
-Next, we see whether the interaction is significant.
-It is, but barely.
-I also estimate the simple slopes, which show a stronger association for plant-based compared to meat-based foods.
-```{r}
-# get p-value
-h4_sim_p <- mixed(
-  rating ~
-    change_diet_s * food_type +
-    (1 + food_type | pp) +
-    (1 | food),
-  simulations,
-  type = 3,
-  method = "S"
-)
-
-anova(h4_sim_p)
-
-# simple slopes
-emtrends(
-  h4_sim,
-  pairwise ~ food_type,
-  var = "change_diet_s"
-)
-
-# get approximate effect size
-r.squaredGLMM(h4_sim)
-```
-
-### 4.2 Exploratory
+### 4.4.2 Exploratory
 
 Just as before, I check whether the inclusion of those with a high RSI change anything about the results.
-The results don't change for attractiveness, but for simulations the main effect of the intention to reduce eating meat is not significant anymore.
+They don't.
 ```{r h4_high_rsi}
 # get p-value for attractiveness
 h4_attr_p_rsi <-
@@ -2820,29 +2713,10 @@ h4_attr_p_rsi <-
   )
 
 anova(h4_attr_p_rsi)
-
-# get p-value for simulations
-h4_sim_p_rsi <-
-  mixed(
-    rating ~
-    change_diet_s * food_type +
-    (1 + food_type | pp) +
-    (1 | food),
-    data = full_join( # add high rsi cases
-      simulations,
-      high_rsi %>% 
-        filter(measure == "simulations") %>% 
-        mutate(change_diet_s = scale(change_diet, scale = TRUE))
-    ),
-    type = 3,
-    method = "S"
-  )
-
-anova(h4_sim_p_rsi)
 ```
 
 As a next step, I see whether the results are robust to the exclusion of the outliers I identified above.
-I start with the outliers on attractiveness: the effect remains significant.
+The effect remains significant.
 ```{r h4_attr_exclude_outliers}
 # get p-value
 h4_attr_no_outliers <- mixed(
@@ -2861,25 +2735,7 @@ h4_attr_no_outliers <- mixed(
 anova(h4_attr_no_outliers)
 ```
 
-Next, I remove the outliers on simulations: the interaction effect remains robust, but the main effect does not.
-```{r h4_sim_exclude_outliers}
-# get p-value
-h4_sim_no_outliers <- mixed(
-  rating ~
-    change_diet_s * food_type +
-    (1 + food_type | pp) +
-    (1 | food),
-  simulations %>% 
-    filter(pp != "pp_103") %>% 
-    filter(!food %in% c("vegan_fillets", "haddock", "salsa_pizza")),
-  type = 3,
-  method = "S"
-)
-
-anova(h4_sim_no_outliers)
-```
-
-## 4.2 Further exploratory tests
+## 4.5 Further exploratory tests
 
 Out of interest, I'd like to see the interaction in H4 with meat eating frequency.
 ```{r expl_attr_meat_eating_frequency}
@@ -2936,7 +2792,7 @@ emtrends(
 r.squaredGLMM(exp_attr_meat)
 ```
 
-The same for simulations.
+out of curiousity, the same for simulations.
 ```{r expl_sim_meat_eating_frequency}
 # standardize the predictor
 simulations <-
@@ -2994,8 +2850,8 @@ r.squaredGLMM(exp_sim_meat)
 Another interest: Do labels help frequent meat eaters in finding plant-based foods more attractive?
 Specifically, do enhanced labels reduce the association between frequency of eating meat and simulations/attractiveness (only plant-based).
 
-I check that with attractiveness first.
-Indeed, the more meat people eat, the less they find plant-based foods attractive, but less so for enhanced food labels.
+I check that with attractiveness.
+Indeed, the more meat people eat, they find plant-based foods attractive, but less so for enhanced food labels.
 ```{r expl_attr_meat_eating_labels}
 # plot
 ggplot(attractiveness %>% 
@@ -3201,34 +3057,12 @@ working_file %>%
   cor(., method = "pearson")
 ```
 
+It was interesting that the effect of label type was not significant anymore after including simulations as predictor.
+Below I want to see whether this also happens when predicting simulations with attractiveness.
+These tests follow the logic of the classic Sobel test.
 
-# 5. Write final files
-Last, I write the final analysis files.
-I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
-```{r write_final_files}
-# save models
-save(
-  h4_attr, 
-  h4_sim, 
-  exp_attr_meat, 
-  exp_sim_meat, 
-  exp_attr_meat_labels, 
-  exp_sim_meat_labels,
-  exp_attr_hunger_food,
-  file = here("plots", "models", "models.RData")
-)
-
-# final file
-write_csv(working_file, here("data", "study2", "analysis_file.csv"))
-
-# attractiveness only
-write_csv(attractiveness, here("data", "study2", "attractiveness.csv"))
-
-# simulations only
-write_csv(simulations, here("data", "study2", "simulations.csv"))
-```
-
-```{r}
+When simulations predict attractiveness, the direct effect of label type is greatly decreased, more than when attractiveness predicts simulations.
+```{r sobel_tests}
 ### sobel test simulations predicting attractiveness
 
 # labels predicting attractiveness
@@ -3303,5 +3137,30 @@ attr_sim_label <-
 summary(attr_sim_label)
 ```
 
+# 5. Write final files
+Last, I write the final analysis files.
+I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
+```{r write_final_files}
+# save models
+save(
+  h4_attr, 
+  h4_sim, 
+  exp_attr_meat, 
+  exp_sim_meat, 
+  exp_attr_meat_labels, 
+  exp_sim_meat_labels,
+  exp_attr_hunger_food,
+  file = here("plots", "models", "models.RData")
+)
+
+# final file
+write_csv(working_file, here("data", "study2", "analysis_file.csv"))
+
+# attractiveness only
+write_csv(attractiveness, here("data", "study2", "attractiveness.csv"))
+
+# simulations only
+write_csv(simulations, here("data", "study2", "simulations.csv"))
+```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
