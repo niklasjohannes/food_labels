@@ -904,7 +904,7 @@ exp_meat_label_plot <-
     "label_type",
     "Rating",
     "Frequency of Eating Meat",
-    "Label Type"
+    "Description Type"
     )
 
 exp_meat_label_plot
