@@ -137,30 +137,6 @@ summary_stats <-
     
     summary_stats
   }
-
-### FUNCTION 4 ###
-# applies the betareg transformation
-betareg_transformation <-
-  function(
-    value
-  ) {
-    n <- length(unique(analysis_file$food))
-    
-    value <-
-      (value * (n - 1) + 0.5) / n
-  }
-
-
-### FUNCTION 5 ###
-# arranges cook's distance from highest to lowest
-arrange_cook <-
-  function(outliers, grouping_factor){
-    cooks.distance(outliers) %>% 
-      as_tibble(rownames = as.character(grouping_factor)) %>%
-      rename(cooks_distance = value) %>% 
-      arrange(desc(cooks_distance)) %>% 
-      head()
-  }
 ```
 
 # 1. Load data and wrangle data
@@ -408,6 +384,8 @@ working_file %>%
 Next, I visualize the different variables.
 I'll start with the total number of features overall and per food.
 Overall, it looks skewed with a long left tail, but without a really clear visual outlier.
+
+Also, there weren't enough vegetarian options at Iceland and not enough vegan options at M&S, which is why the food types are slightly unbalanced.
 ```{r visualize_totals_per_food}
 # number of features per food and feature type
 ggplot(
@@ -436,6 +414,17 @@ working_file %>%
   ungroup() %>% 
   pull(total) %>% 
   stat.desc()
+
+# number of foods per supermarket and food type
+working_file %>% 
+  group_by(food) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  with(.,
+       table(
+         supermarket,
+         food_type
+       ))
 ```
 
 Next, I'll do the same with the proportions proportions of consumption situtation features.
@@ -678,7 +667,7 @@ r.squaredGLMM(consumption_model)
 
 The model diagnostics look fine.
 The test for outliers barely passes the significance cut-off, but inspecting the actual plots shows that the model fits rather well.
-```{r sensory_model_diagnostics}
+```{r consumption_model_diagnostics}
 # simulate residuals
 consumption_residuals <- simulateResiduals(consumption_model, 1000)
 
@@ -734,7 +723,7 @@ r.squaredGLMM(non_consumption_model)
 
 The model diagnostics look fine again.
 The test for outliers passes the significance cut-off, but inspecting the actual plots shows that the model fits rather well.
-```{r sensory_model_diagnostics}
+```{r non_consumption_model_diagnostics}
 # simulate residuals
 non_consumption_residuals <- simulateResiduals(non_consumption_model, 1000)
 
@@ -748,7 +737,7 @@ testOutliers(non_consumption_residuals, plot = T)
 Next, I inspect the p-value and pairwise comparisons.
 The overall effect is significant, driven by highly significant difference between vegan and meat-based.
 The difference between vegan and vegetarian is also significant.
-```{r consumption_model_p}
+```{r non_consumption_model_p}
 # p-value with LRT
 non_consumption_model_p <-
   mixed(
@@ -791,7 +780,7 @@ r.squaredGLMM(situation_independent_model)
 
 The model diagnostics look really good.
 One outlier is flagged, but the overall outlier statistic shows that this is nothing to worry about.
-```{r sensory_model_diagnostics}
+```{r situation_independent_model_diagnostics}
 # simulate residuals
 situation_independent_residuals <- simulateResiduals(situation_independent_model, 1000)
 
@@ -804,7 +793,7 @@ testOutliers(situation_independent_residuals, plot = T)
 
 Next, I inspect the p-value and pairwise comparisons.
 The overall effect is barely significant, driven by highly significant difference between vegetarian and meat-based foods; the difference between vegan and meat-based is also significant.
-```{r consumption_model_p}
+```{r situation_independent_model_p}
 # p-value with LRT
 situation_independent_model_p <-
   mixed(
