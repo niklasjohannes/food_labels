@@ -140,8 +140,8 @@ rc_plot <- function(
     mutate( # recreate "numeric" factor (see description raincloud plots)
       food_type_n = case_when(
       food_type == "meat_based" ~ 1,
-      food_type == "vegan" ~ 2,
-      food_type =="vegetarian" ~ 3
+      food_type == "vegetarian" ~ 2,
+      food_type =="plant_based" ~ 3
       ),
       food_type_n = as.factor(food_type_n)
     )
@@ -194,7 +194,7 @@ rc_plot <- function(
     ylim(c(-.002,1)) + # to not cut off points with jitter
     ylab(ylab) +
     xlab("Food Type") +
-    scale_x_discrete(labels = c("Meat-based", "Vegan","Vegatarian")) + # rename the x axis after transforming it to numeric earlier
+    scale_x_discrete(labels = c("Meat-based", "Vegetarian","Plant-based")) + # rename the x axis after transforming it to numeric earlier
     scale_color_brewer(palette = "Set2") +
     scale_fill_brewer(palette = "Set2") +
     theme_cowplot() +
@@ -262,35 +262,6 @@ get_effects <-
     return(effects_tibble)
   }
 
-# helper function that combines the effects tibbles from the models for attractiveness and simulations, so that I can facet wrap later
-merge_effects <-
-  function(
-    attr_dat,
-    sim_dat
-  ){
-    
-    # add identifier for outcomes
-    attr_dat <-
-      attr_dat %>% 
-      mutate(
-        measure = "Attractiveness"
-      )
-    
-    sim_dat <-
-      sim_dat %>% 
-      mutate(
-        measure = "Simulations"
-      )
-    
-    full_dat <- 
-      full_join(
-        attr_dat,
-        sim_dat
-      )
-    
-    return(full_dat)
-  }
-
 # plot function for line plots
 interaction_plot <-
   function(
@@ -300,8 +271,7 @@ interaction_plot <-
     group_by,
     y_lab,
     x_lab,
-    legend_title,
-    facet_by
+    legend_title
   ){
     line_plot <-
     ggplot(
@@ -335,8 +305,7 @@ interaction_plot <-
           family="Century Gothic" # change font
         ),
         strip.background.x = element_blank(),
-      ) +
-      facet_wrap(~ measure)
+      )
   }
 ```
 
@@ -357,6 +326,24 @@ study1 <-
   )
 ```
 
+For the plot, I rename `vegan` to `plant-based` to be consistent with study 2, and also reorder the factor to go from meat to vegetarian to plant-based.
+```{r reorder_study1}
+study1 <-
+  study1 %>% 
+  mutate(
+    food_type = fct_recode(
+      food_type,
+      "plant_based" = "vegan"
+    ),
+    food_type = fct_relevel(
+      food_type,
+      "vegetarian",
+      after = 1
+    )
+  )
+```
+
+
 Now on to the producing the raincloud plots for the proportions of feature categories by food type.
 To get the points (aka the rain) to fall left of the x-axis mark, the authors recommend to recode the factor on the x-axis to numbers, and then use that number to "move" the points.
 ```{r factors_to_numbers_study1}
@@ -365,8 +352,8 @@ study1 <-
   mutate(
     food_type_n = case_when(
       food_type == "meat_based" ~ 1,
-      food_type == "vegan" ~ 2,
-      food_type =="vegetarian" ~ 3
+      food_type == "vegetarian" ~ 2,
+      food_type =="plant_based" ~ 3
     ),
     food_type_n = as.factor(food_type_n)
   )
@@ -388,8 +375,8 @@ sensory_stats_study1 <-
   mutate( # same as above
   food_type_n = case_when(
     food_type == "meat_based" ~ 1,
-    food_type == "vegan" ~ 2,
-    food_type =="vegetarian" ~ 3
+    food_type == "vegetarian" ~ 2,
+    food_type =="plant_based" ~ 3
   ),
   food_type_n = as.factor(food_type_n)
 )
@@ -446,7 +433,7 @@ rc_plot <-
   ylim(c(-.002,1)) + # to not cut off points with jitter
   ylab("Proportion of Sensory Features") +
   xlab("Food Type") +
-  scale_x_discrete(labels = c("Meat-based", "Vegan","Vegatarian")) + # rename the x axis after transforming it to numeric earlier
+  scale_x_discrete(labels = c("Meat-based", "Vegetarian","Plant-based")) + # rename the x axis after transforming it to numeric earlier
   scale_color_brewer(palette = "Set2") +
   scale_fill_brewer(palette = "Set2") +
   theme_cowplot() +
@@ -511,7 +498,7 @@ situation_independent_plot
 
 Alternatively, I'd like to have the three categories shown per food type.
 For that purpose, I need to restructure the data (into long format), so I can facet wrap the plots.
-Also, I need summary stats, this time with with-person standard error because there are multiple measurements of proportions per food type.
+Also, I need summary stats, this time with within-subject standard error because there are multiple measurements of proportions per food type.
 ```{r get_summary_proportion_type}
 # turn into long format
 study1_long <-
@@ -545,8 +532,8 @@ study1_long <-
     food_type = recode(
       food_type,
       "meat_based" = "Meat-based",
-      "vegan" = "Vegan",
-      "vegetarian" = "Vegetarian"
+      "vegetarian" = "Vegetarian",
+      "plant_based" = "Plant-based"
     )
   )
 
@@ -567,8 +554,8 @@ summary_stats_study1 <-
     food_type = recode(
       food_type,
       "meat_based" = "Meat-based",
-      "vegan" = "Vegan",
-      "vegetarian" = "Vegetarian"
+      "vegetarian" = "Vegetarian",
+      "plant_based" = "Plant-based"
     )
   )
 ```
@@ -663,7 +650,7 @@ study2 <-
 ```
 
 Now on to producing the 2x2 raincloud plot.
-I rcode the factor just like above.
+I recode the factor just like above.
 ```{r numeric_factor_study2}
 study2 <-
   study2 %>% 
@@ -779,7 +766,7 @@ rc_plot_study2 <-
   ) +
   ylim(c(0,100)) +
   ylab("Rating") +
-  xlab("Label Type") +
+  xlab("Description Type") +
   labs(fill = "Food Type", # otherwise I get two legends
        color = "Food Type") +
   scale_x_discrete(labels = c('Control','Enhanced')) + # rename the x axis after transforming it to numeric earlier
@@ -802,7 +789,7 @@ rc_plot_study2
 Next, I plot the interactions between categorical and numerical variables.
 Contrary to the raincloud plots, where I plotted the raw data, the interaction plots are meant to illustrate the simple slope analyses.
 When plotting the raw data with a fitted line, this line will be fitted with `lm`.
-Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted.
+Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted based on mixed-effects models.
 ```{r interaction_plots_simple}
 # with simple slope and lm method (without SEs, because they'd be wrong)
 ggplot(study2 %>% 
@@ -845,24 +832,16 @@ plot(
   multiline = TRUE)
 ```
 
-
 Plots for the interaction of intention to reduce eating meat and food type.
 ```{r change_diet_food_type_interaction}
 # get the data set
-h4_effects <- merge_effects(
+h4_effects <-
   get_effects(
     "change_diet_s:food_type",
     h4_attr,
     5000,
     "food_type"
-  ),
-  get_effects(
-    "change_diet_s:food_type",
-    h4_sim,
-    5000,
-    "food_type"
   )
-)
 
 # plot data
 h4_plot <-
@@ -871,10 +850,9 @@ h4_plot <-
     "change_diet_s",
     "fit",
     "food_type",
-    "Rating",
+    "Attractiveness",
     "Intention to Reduce Eating Meat",
-    "Food Type",
-    "measure"
+    "Food Type"
     )
 
 h4_plot
@@ -883,20 +861,13 @@ h4_plot
 Plots for the interaction of frequency of eating meat and food type.
 ```{r meat_frequency_food_type_interaction}
 # get the data set
-exp_meat_effects <- merge_effects(
+exp_meat_effects <- 
   get_effects(
     "meat_per_week_s:food_type",
     exp_attr_meat,
     5000,
     "food_type"
-  ),
-  get_effects(
-    "meat_per_week_s:food_type",
-    exp_sim_meat,
-    5000,
-    "food_type"
   )
-)
 
 # plot data
 exp_meat_plot <-
@@ -905,10 +876,9 @@ exp_meat_plot <-
     "meat_per_week_s",
     "fit",
     "food_type",
-    "Rating",
+    "Attractiveness",
     "Frequency of Eating Meat",
-    "Food Type",
-    "measure"
+    "Food Type"
     )
 
 exp_meat_plot
@@ -917,20 +887,13 @@ exp_meat_plot
 Plots for the interaction of frequency of eating meat and label type for plant-based foods.
 ```{r meat_frequency_label_type_interaction}
 # get the data set
-exp_meat_label_effects <- merge_effects(
+exp_meat_label_effects <- 
   get_effects(
     "meat_per_week_s:label_type",
     exp_attr_meat_labels,
     5000,
     "label_type"
-  ),
-  get_effects(
-    "meat_per_week_s:label_type",
-    exp_sim_meat_labels,
-    5000,
-    "label_type"
   )
-)
 
 # plot data
 exp_meat_label_plot <-
@@ -941,57 +904,57 @@ exp_meat_label_plot <-
     "label_type",
     "Rating",
     "Frequency of Eating Meat",
-    "Label Type",
-    "measure"
+    "Label Type"
     )
 
 exp_meat_label_plot
 ```
 
 # 3. Save plots
-```{r save_plots, eval=T}
+Note: I don't save them because they are too large for Github.
+```{r save_plots, eval=F}
 # study1 sensory
-ggsave(here("plots", "sensory_raincloud.tiff"),
+ggsave(here("plots", "figure1.tiff"),
        plot = sensory_plot,
        dpi = 600)
 
 # study1 consumption
-ggsave(here("plots", "consumption_raincloud.tiff"),
+ggsave(here("plots", "study1_consumption.tiff"),
        plot = consumption_plot,
        dpi = 600)
 
 # study1 non-consumption
-ggsave(here("plots", "non_consumption_raincloud.tiff"),
+ggsave(here("plots", "study1_non_consumption.tiff"),
        plot = non_consumption_plot,
        dpi = 600)
 
 # study1 situation independent
-ggsave(here("plots", "situation_independent_raincloud.tiff"),
+ggsave(here("plots", "study1_situation_independent.tiff"),
        plot = situation_independent_plot,
        dpi = 600)
 
 # study1 by food type
-tiff(here("plots", "food_type_raincloud.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
+tiff(here("plots", "figure2.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
 food_type_plot
 dev.off()
 
 # study 2 raincloud
-tiff(here("plots", "study2_raincloud.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+tiff(here("plots", "figure3.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
 rc_plot_study2
 dev.off()
 
 # study 2 interaction h4
-ggsave(here("plots", "h4_plot.tiff"),
+ggsave(here("plots", "figure4.tiff"),
        plot = h4_plot,
        dpi = 600)
 
 # study 2 exploratory plot 1
-ggsave(here("plots", "frequency_meat_food_type.tiff"),
+ggsave(here("plots", "figure5.tiff"),
        plot = exp_meat_plot,
        dpi = 600)
 
 # study 2 exploratory plot 2
-ggsave(here("plots", "frequency_meat_food_labels.tiff"),
+ggsave(here("plots", "figure6.tiff"),
        plot = exp_meat_label_plot,
        dpi = 600)
 ```
