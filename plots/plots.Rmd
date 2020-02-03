@@ -628,6 +628,61 @@ food_type_plot <-
 food_type_plot
 ```
 
+## 1.3 Line graph
+
+Last, I present a line graph that shows the proportion of sensory and action features per supermarket and food type.
+```{r lines_supermarkets}
+# get data
+supermarket_summary <-
+  summarySEwithin(
+    data = study1,
+    measurevar = "sensory_proportion",
+    withinvars = c("food_type", "supermarket")
+  )
+
+# visualize
+line_graph <-
+  ggplot(
+    supermarket_summary %>% 
+      mutate(
+        food_type = fct_recode(
+          food_type,
+          "Meat-based" = "meat_based",
+          "Vegetarian" = "vegetarian",
+          "Plant-based" = "plant_based"
+        ),
+        supermarket = fct_recode(
+          supermarket,
+          "Iceland" = "iceland",
+          "Marks & Spencer" = "m&s",
+          "Tesco" = "tesco",
+          "Waitrose" = "waitrose"
+        )
+      ),
+    aes(
+      x = food_type,
+      y = sensory_proportion,
+      color = supermarket,
+      group = supermarket,
+    )
+  ) +
+  geom_line() +
+  #geom_point(shape = "square") +
+  xlab("Food Type") +
+  ylab("Proportion of Sensory Features") +
+  labs(group = "Supermarket", # otherwise I get two legends
+       color = "Supermarket") +
+  scale_color_brewer(palette = "Dark2") +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic" # change font
+    )
+  )
+
+line_graph
+```
+
 
 # 2. Study 2
 
@@ -913,8 +968,13 @@ exp_meat_label_plot
 # 3. Save plots
 Note: I don't save them because they are too large for Github.
 ```{r save_plots, eval=F}
-# study1 sensory
+# study 1 supermarkets
 ggsave(here("plots", "figure1.tiff"),
+       plot = line_graph,
+       dpi = 600)
+
+# study1 sensory
+ggsave(here("plots", "figure2.tiff"),
        plot = sensory_plot,
        dpi = 600)
 
@@ -934,27 +994,27 @@ ggsave(here("plots", "study1_situation_independent.tiff"),
        dpi = 600)
 
 # study1 by food type
-tiff(here("plots", "figure2.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
+tiff(here("plots", "figure3.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
 food_type_plot
 dev.off()
 
 # study 2 raincloud
-tiff(here("plots", "figure3.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+tiff(here("plots", "figure4.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
 rc_plot_study2
 dev.off()
 
 # study 2 interaction h4
-ggsave(here("plots", "figure4.tiff"),
+ggsave(here("plots", "figure5.tiff"),
        plot = h4_plot,
        dpi = 600)
 
 # study 2 exploratory plot 1
-ggsave(here("plots", "figure5.tiff"),
+ggsave(here("plots", "figure6.tiff"),
        plot = exp_meat_plot,
        dpi = 600)
 
 # study 2 exploratory plot 2
-ggsave(here("plots", "figure6.tiff"),
+ggsave(here("plots", "figure7.tiff"),
        plot = exp_meat_label_plot,
        dpi = 600)
 ```

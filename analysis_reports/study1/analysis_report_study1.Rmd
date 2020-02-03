@@ -532,6 +532,8 @@ Total features by supermarket show that we should take supermarket into account 
 ```{r all_by_supermarket}
 # summary stats
 working_file %>% 
+  group_by(food) %>% 
+  slice(1) %>% 
   group_by(supermarket) %>% 
   summarize(
     mean = mean(total),
@@ -540,7 +542,9 @@ working_file %>%
 
 # visualize
 ggplot(
-  working_file,
+  working_file %>% 
+    group_by(food) %>% 
+    slice(1),
   aes(
     x = supermarket,
     y = total,
@@ -551,6 +555,29 @@ ggplot(
   geom_violin() +
   scale_color_brewer(palette = "Dark2") +
   scale_fill_brewer(palette = "Dark2")
+```
+
+When we only look at the proportion of sensory and action features, one supermarket stands out, again justifying that we include supermarket as random effect.
+```{r}
+# features by supermarket and food
+sensory_supermarket <-
+  working_file %>% 
+    group_by(food) %>% 
+    slice(1) %>% 
+    group_by(supermarket, food_type) %>% 
+    summarize(mean = mean(sensory_proportion))
+
+# visualize
+ggplot(
+  sensory_supermarket,
+  aes(
+    x = food_type,
+    y = mean,
+    color = supermarket,
+    group = supermarket
+  )
+) +
+  geom_line()
 ```
 
 
