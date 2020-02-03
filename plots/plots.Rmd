@@ -15,7 +15,8 @@ knitr::opts_chunk$set(echo = TRUE,
 In this file, I produce the graphs for the analysis section.
 I start with loading the libraries we need, plus functions.
 
-Note: To get the same font for the graphs, you will probably need to call the `font_import` command from the `extrafont` package. 
+Note: To get the same font for the graphs, you will probably need to call the `font_import` command from the `extrafont` package.
+The colors I selected from [here](https://www.datanovia.com/en/blog/ggplot-colors-best-tricks-you-will-love/#use-a-colorblind-friendly-palette).
 ```{r load_libraries}
 # pacman makes it easier to load and install packages
 if (!requireNamespace("pacman"))
@@ -26,6 +27,7 @@ library(pacman)
 p_load(
   Rmisc,
   tidyverse,
+  ggthemes,
   here,
   cowplot,
   effects,
@@ -195,8 +197,8 @@ rc_plot <- function(
     ylab(ylab) +
     xlab("Food Type") +
     scale_x_discrete(labels = c("Meat-based", "Vegetarian","Plant-based")) + # rename the x axis after transforming it to numeric earlier
-    scale_color_brewer(palette = "Set2") +
-    scale_fill_brewer(palette = "Set2") +
+    scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
+    scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
     theme_cowplot() +
     theme(
       text = element_text(
@@ -298,14 +300,24 @@ interaction_plot <-
       labs(color = legend_title,
            fill = legend_title) + # otherwise I get two legends)
       theme_cowplot() +
-      scale_color_brewer(palette = "Set2") +
-      scale_fill_brewer(palette = "Set2") +
+      scale_color_manual(values = c("#009E73", "#D55E00")) +
+      scale_fill_manual(values = c("#009E73", "#D55E00")) +
       theme(
         text = element_text(
-          family="Century Gothic" # change font
-        ),
+          family="Century Gothic", # change font
+          size = 20
+        ), 
         strip.background.x = element_blank(),
-      )
+        axis.text.x = element_text(
+          size = 17
+        ),
+        legend.title = element_text(
+          size = 17
+        ),
+        legend.text = element_text(
+          size = 17
+        )
+      ) 
   }
 ```
 
@@ -321,7 +333,7 @@ study1 <- read_csv(here("data", "study1", "analysis_file.csv"))
 study1 <-
   study1 %>%
   mutate_at(
-    vars(food_id:food_type),
+    vars(food_id:supermarket),
     list(~ as.factor(.))
   )
 ```
@@ -434,8 +446,8 @@ rc_plot <-
   ylab("Proportion of Sensory Features") +
   xlab("Food Type") +
   scale_x_discrete(labels = c("Meat-based", "Vegetarian","Plant-based")) + # rename the x axis after transforming it to numeric earlier
-  scale_color_brewer(palette = "Set2") +
-  scale_fill_brewer(palette = "Set2") +
+  scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
   theme_cowplot() +
   theme(
     text = element_text(
@@ -506,13 +518,14 @@ study1_long <-
   select(
     food_id,
     food_type,
+    supermarket,
     consumption_proportion,
     non_consumption_proportion,
     situation_independent_proportion
   ) %>% 
   # turn into long format
   pivot_longer(
-    cols = c(-food_id, -food_type),
+    cols = c(-food_id, -food_type, -supermarket),
     names_to = c("proportion_type", ".value"),
     names_sep = "_(?!.*_)"
   ) %>% 
@@ -611,12 +624,19 @@ food_type_plot <-
   ylab("Proportion") +
   labs(fill = "Proportion Type", # otherwise I get two legends
        color = "Proportion Type") +
-  scale_color_brewer(palette = "Set2") +
-  scale_fill_brewer(palette = "Set2") +
+  scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2")) +
   theme_cowplot() +
   theme(
     text = element_text(
-      family="Century Gothic" # change font
+      family="Century Gothic", # change font
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 14
+    ),
+    legend.text = element_text(
+      size = 14
     ),
     strip.background.x = element_blank(),
     axis.title.x = element_blank(),
@@ -650,13 +670,6 @@ line_graph <-
           "Meat-based" = "meat_based",
           "Vegetarian" = "vegetarian",
           "Plant-based" = "plant_based"
-        ),
-        supermarket = fct_recode(
-          supermarket,
-          "Iceland" = "iceland",
-          "Marks & Spencer" = "m&s",
-          "Tesco" = "tesco",
-          "Waitrose" = "waitrose"
         )
       ),
     aes(
@@ -672,7 +685,8 @@ line_graph <-
   ylab("Proportion of Sensory Features") +
   labs(group = "Supermarket", # otherwise I get two legends
        color = "Supermarket") +
-  scale_color_brewer(palette = "Dark2") +
+  scale_color_colorblind() +
+  scale_fill_colorblind() +
   theme_cowplot() +
   theme(
     text = element_text(
@@ -683,6 +697,116 @@ line_graph <-
 line_graph
 ```
 
+Maybe a line graph isn't ideal, so I'll visualize that as a raincloud plot as well.
+```{r rainclouds_supermarket}
+# change factor levels for plot
+study1 <-
+  study1 %>% 
+  mutate(
+    supermarket_n = case_when(
+      supermarket == "A" ~ 1,
+      supermarket == "B" ~ 2,
+      supermarket == "C" ~ 3,
+      supermarket == "D" ~ 4
+    ),
+    food_type = recode(
+      food_type,
+      "meat_based" = "Meat-based",
+      "vegetarian" = "Vegetarian",
+      "plant_based" = "Plant-based"
+    )
+  )
+
+supermarket_summary <-
+  supermarket_summary %>% 
+    mutate(
+    supermarket_n = case_when(
+      supermarket == "A" ~ 1,
+      supermarket == "B" ~ 2,
+      supermarket == "C" ~ 3,
+      supermarket == "D" ~ 4
+    ),
+    food_type = recode(
+      food_type,
+      "meat_based" = "Meat-based",
+      "vegetarian" = "Vegetarian",
+      "plant_based" = "Plant-based"
+    )
+  )
+
+
+rc_supermarket <-
+  ggplot(
+    study1,
+    aes(
+      x = supermarket,
+      y = sensory_proportion,
+      fill = supermarket,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = .1, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(supermarket_n)-.2, # transfer the factor to number so that I can move the rain to the left with the -
+                 color = supermarket,
+                 y = sensory_proportion),
+             position = position_jitter(width = .1),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = supermarket_summary,
+    aes(
+      x = as.numeric(supermarket_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = sensory_proportion,
+      color = supermarket
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = supermarket_summary,
+    aes(
+      x = as.numeric(supermarket_n)-.25,
+      y = sensory_proportion,
+      ymin = sensory_proportion - ci,
+      ymax = sensory_proportion + ci,
+      color = supermarket
+    ),
+    position = position_nudge(.25),
+    width = 0.00,
+    size = 0.8
+  ) +
+  ylim(c(-.002,1.002)) + # to not cut off points with jitter
+  xlab("Supermarket") +
+  ylab("Proportion of Sensory Features") +
+  labs(fill = "Supermarket", # otherwise I get two legends
+       color = "Supermarket") +
+  scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic", # change font
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 22
+    ),
+    legend.text = element_text(
+      size = 22
+    ),
+    strip.background.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  facet_wrap(~ food_type)
+
+rc_supermarket
+```
 
 # 2. Study 2
 
@@ -825,14 +949,24 @@ rc_plot_study2 <-
   labs(fill = "Food Type", # otherwise I get two legends
        color = "Food Type") +
   scale_x_discrete(labels = c('Control','Enhanced')) + # rename the x axis after transforming it to numeric earlier
-  scale_color_brewer(palette = "Set2") +
-  scale_fill_brewer(palette = "Set2") +
+  scale_color_manual(values = c("#009E73", "#D55E00")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00")) +
   theme_cowplot() +
   theme(
     text = element_text(
-      family="Century Gothic" # change font
+      family="Century Gothic", # change font
+      size = 28
     ), 
-    strip.background.x = element_blank()
+    strip.background.x = element_blank(),
+    axis.text.x = element_text(
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 22
+    ),
+    legend.text = element_text(
+      size = 22
+    )
   ) + 
   facet_grid(. ~ measure)
 
@@ -861,7 +995,7 @@ ggplot(study2 %>%
     ) + 
   geom_point(alpha = 0.2) + 
   ylim(0, 100) +
-  scale_color_brewer(palette = "Set2") +
+  scale_color_manual(values = c("#009E73", "#D55E00")) +
   theme_cowplot()
 ```
 
@@ -969,9 +1103,9 @@ exp_meat_label_plot
 Note: I don't save them because they are too large for Github.
 ```{r save_plots, eval=F}
 # study 1 supermarkets
-ggsave(here("plots", "figure1.tiff"),
-       plot = line_graph,
-       dpi = 600)
+tiff(here("plots", "figure1.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
+rc_supermarket
+dev.off()
 
 # study1 sensory
 ggsave(here("plots", "figure2.tiff"),
