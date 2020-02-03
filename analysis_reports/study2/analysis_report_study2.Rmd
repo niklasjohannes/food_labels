@@ -1382,6 +1382,35 @@ high_rsi <-
   )
 ```
 
+For the supplementary online materials, we also want to provide a table that lists all food descriptions with average attractiveness ratings for each label type.
+For this, I get the means per food by label type.
+```{r label_per_food_means}
+means_per_food <-
+  working_file %>% 
+  filter(measure == "attractiveness") %>% 
+  group_by(food, label_type) %>% 
+  summarize(
+    food_mean = mean(rating, na.rm = TRUE)
+  ) %>% 
+  mutate(
+    food_mean = round(food_mean, digits = 2)
+  ) %>%  # turn into wide format
+  pivot_wider(
+    id_cols = food,
+    names_from = label_type,
+    values_from = food_mean
+  )
+
+head(means_per_food)
+
+# write file as table
+write_delim(
+  means_per_food,
+  here("data", "study2", "means_per_food.txt"),
+  delim = ","
+)
+```
+
 Also, because there's two dependent variables in the data, I'll split the working file into two analysis files, one per measurement.
 ```{r split_analysis_file}
 simulations <-
