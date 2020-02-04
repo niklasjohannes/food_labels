@@ -648,7 +648,7 @@ food_type_plot <-
 food_type_plot
 ```
 
-## 1.3 Line graph
+## 1.3 Supermarket graph
 
 Last, I present a line graph that shows the proportion of sensory and action features per supermarket and food type.
 ```{r lines_supermarkets}
@@ -807,6 +807,96 @@ rc_supermarket <-
 
 rc_supermarket
 ```
+
+Still pretty messy, I'll try means with CIs faceted by food type.
+```{r point_graph_food_types}
+point_graph_food <-
+  ggplot(
+    supermarket_summary,
+    aes(
+      x = food_type,
+      y = sensory_proportion,
+      color = supermarket
+    )
+  ) +
+  geom_point(
+    size = 3,
+    position = position_dodge(width = 0.5)
+  ) +
+  geom_errorbar(
+    aes(
+      ymin = sensory_proportion - ci,
+      ymax = sensory_proportion + ci
+    ),
+    size = 0.8,
+    width = 0.00,
+    position = position_dodge(width = 0.5)
+  ) +
+  coord_cartesian(ylim = c(0, 0.3)) +
+  xlab("Food Type") +
+  ylab("Proportion of Sensory Features") +
+  labs(color = "Supermarket") +
+  scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic", # change font
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 22
+    ),
+    legend.text = element_text(
+      size = 22
+    ),
+    axis.text.x = element_text(
+      size = 16
+    ),
+    axis.ticks.x = element_blank()
+  )
+
+point_graph_food
+```
+
+I'll also try out the other way around.
+```{r point_graph_supermarkets}
+point_graph_supermarkets <-
+  ggplot(
+    supermarket_summary,
+    aes(
+      x = supermarket,
+      y = sensory_proportion,
+      color = food_type
+    )
+  ) +
+  geom_point(
+    size = 3,
+    position = position_dodge(width = 0.5)
+  ) +
+  geom_errorbar(
+    aes(
+      ymin = sensory_proportion - ci,
+      ymax = sensory_proportion + ci
+    ),
+    size = 0.8,
+    width = 0.00,
+    position = position_dodge(width = 0.5)
+  ) +
+  coord_cartesian(ylim = c(0, 0.3)) +
+  xlab("Supermarket") +
+  ylab("Proportion of Sensory Features") +
+  labs(color = "Food Type") +
+  scale_color_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  scale_fill_manual(values = c("#009E73", "#D55E00", "#0072B2", "#CC79A7")) +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic" # change font
+    )
+  )
+```
+
 
 # 2. Study 2
 
@@ -1104,7 +1194,7 @@ Note: I don't save them because they are too large for Github.
 ```{r save_plots, eval=F}
 # study 1 supermarkets
 tiff(here("plots", "figure1.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
-rc_supermarket
+point_graph_food
 dev.off()
 
 # study1 sensory
