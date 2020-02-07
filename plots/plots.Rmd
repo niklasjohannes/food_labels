@@ -1181,7 +1181,7 @@ exp_meat_label_plot <-
     "meat_per_week_s",
     "fit",
     "label_type",
-    "Rating",
+    "Attractiveness",
     "Frequency of Eating Meat",
     "Description Type"
     )
