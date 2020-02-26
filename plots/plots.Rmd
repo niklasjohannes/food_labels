@@ -2,7 +2,13 @@
 title: "Plots"
 author: "Niklas Johannes"
 date: "2019-11-04"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: default
+    highlight: default
+    code_folding: show
 ---
 
 ```{r setup, include=FALSE}
@@ -30,6 +36,7 @@ p_load(
   ggthemes,
   here,
   cowplot,
+  wordcloud2,
   effects,
   extrafont
 )
@@ -897,6 +904,90 @@ point_graph_supermarkets <-
   )
 ```
 
+## 1.4 Word clouds
+To get a better idea of the features that the labels contained, I also create word clouds.
+The `food_labels.csv` data set contains the foods, their features, and the supermarket they come from.
+```{r get_features}
+# get data set
+features <- 
+  read_csv(
+    here("data", "study1", "food_labels.csv")
+  )
+```
+
+I want to create three word clouds, one for each type of food.
+In the data set, there's no identifier of the food type.
+However, the food type is in the `study1` data set.
+So I first merge those two to get a food identifier for each food in `features`.
+```{r merge_features_analyis_file}
+features <- 
+  left_join(
+    features,
+    study1 %>% 
+      select(food, food_type),
+    by = c("food")
+  )
+```
+
+For the wordcloud, we only need a frequency table of the features.
+I first only select the feature column and then create three frequency tables.
+```{r frequency_tables}
+features <- 
+  features %>% 
+  select(feature, food_type) %>% 
+  group_by(food_type) %>% 
+  count(feature) %>% 
+  ungroup()
+```
+
+Get the wordclouds per food type.
+Start with meat-based.
+```{r wordcloud_meat}
+wordcloud_meat <-
+  features %>% 
+  filter(food_type == "Meat-based") %>% 
+  select(-food_type) %>% 
+  wordcloud2(
+    .,
+    size = 3,
+    fontFamily = "Century Gothic",
+    color = "random-dark"
+  )
+
+wordcloud_meat
+```
+
+Then vegetarian.
+```{r wordcloud_vegetarian}
+wordcloud_vegetarian <-
+  features %>% 
+  filter(food_type == "Vegetarian") %>% 
+  select(-food_type) %>% 
+  wordcloud2(
+    .,
+    size = 3,
+    fontFamily = "Century Gothic",
+    color = "random-dark"
+  )
+
+wordcloud_vegetarian
+```
+
+And plant-based.
+```{r wordcloud_plant_based}
+wordcloud_plant_based <-
+  features %>% 
+  filter(food_type == "Plant-based") %>% 
+  select(-food_type) %>% 
+  wordcloud2(
+    .,
+    size = 3,
+    fontFamily = "Century Gothic",
+    color = "random-dark"
+  )
+
+wordcloud_plant_based
+```
 
 # 2. Study 2
 
@@ -1191,6 +1282,8 @@ exp_meat_label_plot
 
 # 3. Save plots
 Note: I don't save them because they are too large for Github.
+Also note that the wordclouds don't have a clean code solution for saving yet, see [here](https://github.com/Lchiffon/wordcloud2/issues/8).
+Those I just saved from the viewer pane manually.
 ```{r save_plots, eval=F}
 # study 1 supermarkets
 tiff(here("plots", "figure1.tiff"), width = 879*8, height = 632*5, units = "px", res = 600)
