@@ -3303,7 +3303,7 @@ save(
   exp_attr_meat_labels, 
   exp_sim_meat_labels,
   exp_attr_hunger_food,
-  file = here("plots", "models", "models.RData")
+  file = here("plots", "models", "models_study3.RData")
 )
 
 # final file

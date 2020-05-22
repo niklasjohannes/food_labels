@@ -345,7 +345,7 @@ study1 <-
   )
 ```
 
-For the plot, I rename `vegan` to `plant-based` to be consistent with study 2, and also reorder the factor to go from meat to vegetarian to plant-based.
+For the plot, I rename `vegan` to `plant-based` to be consistent with study 3, and also reorder the factor to go from meat to vegetarian to plant-based.
 ```{r reorder_study1}
 study1 <-
   study1 %>% 
@@ -513,7 +513,6 @@ situation_independent_plot <-
 
 situation_independent_plot
 ```
-
 
 Alternatively, I'd like to have the three categories shown per food type.
 For that purpose, I need to restructure the data (into long format), so I can facet wrap the plots.
@@ -989,20 +988,441 @@ wordcloud_plant_based <-
 wordcloud_plant_based
 ```
 
-# 2. Study 2
+# Study 2
 
 ## 2.1 Load and prepare data
-
-Next, I load the final data files from Study 2.
-I saved those at the end of the analysis report (`analysis_report_study2.Rmd`).
-```{r factors_to_numbers_study2}
+Next, I load the final data files from Study 2 that I saved at the end of the analysis report (`analysis_report_study2.Rmd`).
+```{r get_data_study2}
 study2 <- read_csv(here("data", "study2", "analysis_file.csv"))
-attractiveness <- read_csv(here("data", "study2", "attractiveness.csv"))
-simulations <- read_csv(here("data", "study2", "simulations.csv"))
+desire <- read_csv(here("data", "study2", "desire.csv"))
 
 # reintroduce factors
 study2 <- 
   study2 %>% 
+  mutate_at(
+    vars(pp, measure, food_type, label_type),
+    list(~ as.factor(.))
+  ) %>% 
+  mutate(
+    food_type = recode(
+      food_type,
+      "plant_based" = "Plant-based",
+      "meat_based" = "Meat-based"
+    )
+  )
+```
+
+## 2.2 Raincloud plots
+For the paper, I'll need two plots: one raincloud plot that shows the four different labels types per food type, faceted by measure (i.e., desire vs. simulations); and one interaction plot that shows the interaction between intention to reduce eating meat and desire per food type.
+I'll start with the raincloud plot.
+Actually, a 4x2 plot plus facet will probably be much too large, so I'll do one per measure.
+
+First recode factor like above.
+```{r numeric_factor_study2}
+study2 <- 
+  study2 %>% 
+  mutate(
+    label_type_n = case_when(
+      label_type == "neutral" ~ 1,
+      label_type == "contextual" ~ 2,
+      label_type == "sensory" ~ 3,
+      label_type == "health_positive" ~ 4
+    ),
+    label_type_n = as.factor(label_type_n)
+  )
+```
+
+Then I start with the desire plot.
+For means with 95%CI, I also need the summary statistics with within-subject standard errors.
+I'll get those with the `Rmisc` package.
+Note that I aggregate per participant first to make the CIs comparable to a repeated-measures ANOVA.
+Also, because we present tests of the main effect of `label_type` exclusively for one hypothesis, I'll add the average of the two food types as a separate line.
+```{r get_summary_desire_study3}
+# aggregate first
+aggregated_desire_study2 <- 
+  study2 %>%
+  filter(measure == "desire") %>% 
+  group_by(pp, label_type, food_type) %>% 
+  summarize(
+    rating1 = mean(rating1)
+  )
+
+# then get summary stats per label type and food type
+summary_stats_desire_study2 <- summarySEwithin(
+  data = aggregated_desire_study2,
+  measurevar = "rating1",
+  withinvars = c("label_type", "food_type"),
+  idvar = "pp"
+) %>% 
+  mutate(
+    label_type_n = case_when(
+      label_type == "neutral" ~ 1,
+      label_type == "contextual" ~ 2,
+      label_type == "sensory" ~ 3,
+      label_type == "health_positive" ~ 4
+    )
+  )
+
+# get the overall trend aggregated over food
+aggregated_desire2_study2 <- 
+  study2 %>% 
+  filter(measure == "desire") %>% 
+  group_by(pp, label_type) %>% 
+  summarize(
+    rating1 = mean(rating1)
+  )
+
+# get summary stats per label type
+summary_stats_desire2_study2 <- summarySEwithin(
+  data = aggregated_desire2_study2,
+  measurevar = "rating1",
+  withinvars = c("label_type"),
+  idvar = "pp"
+) %>% 
+  mutate(
+    label_type_n = case_when(
+      label_type == "neutral" ~ 1,
+      label_type == "contextual" ~ 2,
+      label_type == "sensory" ~ 3,
+      label_type == "health_positive" ~ 4
+    )
+  ) %>% 
+  mutate(
+    food_type = "Overall"
+  )
+
+# add those together
+summary_stats_all_desire_study2 <- 
+  bind_rows(
+    summary_stats_desire_study2,
+    summary_stats_desire2_study2
+  )
+```
+
+Alright, now the raincloud plot.
+Hm, not too sure about the overall line.
+```{r make_it_rain_desire_study2}
+rc_plot_desire_study2 <-
+  ggplot(
+    study2 %>%
+      filter(measure == "desire"),
+    aes(
+      x = label_type_n,
+      y = rating1,
+      fill = food_type,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = 0.05, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(label_type_n)-.2, # transfer the factor to number so that I can move the rain to the left with the -.2
+                 color = food_type,
+                 y = rating1),
+             position = position_jitter(width = .15),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = summary_stats_all_desire_study2,
+    aes(
+      x = as.numeric(label_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = rating1,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = summary_stats_all_desire_study2,
+    aes(
+      x = as.numeric(label_type_n)-.25,
+      y = rating1,
+      ymin = rating1 - se,
+      ymax = rating1 + se,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    width = 0.00,
+    size = 0.8
+  ) +
+  geom_line( # line connecting the means per group
+    data = summary_stats_all_desire_study2,
+    aes(
+      x = as.numeric(label_type_n),
+      y = rating1,
+      group = food_type,
+      color = food_type
+    ),
+    linetype = 1,
+    size = 1.1
+  ) +
+  ylim(c(-0.4,100.4)) +
+  ylab("Desire") +
+  xlab("Description Type") +
+  labs(fill = "Food Type", # otherwise I get two legends
+       color = "Food Type") +
+  scale_x_discrete(labels = c("Neutral", "Context", "Sensory", "Health-positive")) + # rename the x axis after transforming it to numeric earlier
+  scale_color_manual(values = c("#009E73", "#0072B2", "#D55E00")) +
+  scale_fill_manual(values = c("#009E73", "#0072B2", "#D55E00")) +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic", # change font
+      size = 28
+    ), 
+    strip.background.x = element_blank(),
+    axis.text.x = element_text(
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 22
+    ),
+    legend.text = element_text(
+      size = 22
+    )
+  )
+
+rc_plot_desire_study2
+```
+
+Next, get summary stats for simulations.
+```{r get_summary_simulations_study3}
+# aggregate first
+aggregated_simulations_study2 <- 
+  study2 %>%
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type, food_type) %>% 
+  summarize(
+    rating3 = mean(rating3)
+  )
+
+# then get summary stats per label type and food type
+summary_stats_simulations_study2 <- summarySEwithin(
+  data = aggregated_simulations_study2,
+  measurevar = "rating3",
+  withinvars = c("label_type", "food_type"),
+  idvar = "pp"
+) %>% 
+  mutate(
+    label_type_n = case_when(
+      label_type == "neutral" ~ 1,
+      label_type == "contextual" ~ 2,
+      label_type == "sensory" ~ 3,
+      label_type == "health_positive" ~ 4
+    )
+  )
+
+# get the overall trend aggregated over food
+aggregated_simulations2_study2 <- 
+  study2 %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type) %>% 
+  summarize(
+    rating3 = mean(rating3)
+  )
+
+# get summary stats per label type
+summary_stats_simulations2_study2 <- summarySEwithin(
+  data = aggregated_simulations2_study2,
+  measurevar = "rating3",
+  withinvars = c("label_type"),
+  idvar = "pp"
+) %>% 
+  mutate(
+    label_type_n = case_when(
+      label_type == "neutral" ~ 1,
+      label_type == "contextual" ~ 2,
+      label_type == "sensory" ~ 3,
+      label_type == "health_positive" ~ 4
+    )
+  ) %>% 
+  mutate(
+    food_type = "Overall"
+  )
+
+# add those together
+summary_stats_all_simulations_study2 <- 
+  bind_rows(
+    summary_stats_simulations_study2,
+    summary_stats_simulations2_study2
+  )
+```
+
+Alright, now the raincloud plot.
+```{r make_it_rain_desire_study2}
+rc_plot_simulations_study2 <-
+  ggplot(
+    study2 %>%
+      filter(measure == "simulations"),
+    aes(
+      x = label_type_n,
+      y = rating3,
+      fill = food_type,
+    )
+  ) +
+  geom_flat_violin(position = position_nudge(x = 0.05, # move the cloud a bit to the right
+                                             y = 0),
+                   adjust = 1.5,
+                   trim = FALSE,
+                   alpha = 0.5,
+                   color = NA) +
+  geom_point(aes(x = as.numeric(label_type_n)-.2, # transfer the factor to number so that I can move the rain to the left with the -.2
+                 color = food_type,
+                 y = rating3),
+             position = position_jitter(width = .15),
+             size = 1.2,
+             alpha = 0.4) +
+  geom_point( # the mean
+    data = summary_stats_all_simulations_study2,
+    aes(
+      x = as.numeric(label_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
+      y = rating3,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    size = 3
+  ) +
+  geom_errorbar( # error bars
+    data = summary_stats_all_simulations_study2,
+    aes(
+      x = as.numeric(label_type_n)-.25,
+      y = rating3,
+      ymin = rating3 - se,
+      ymax = rating3 + se,
+      color = food_type
+    ),
+    position = position_nudge(.25),
+    width = 0.00,
+    size = 0.8
+  ) +
+  geom_line( # line connecting the means per group
+    data = summary_stats_all_simulations_study2,
+    aes(
+      x = as.numeric(label_type_n),
+      y = rating3,
+      group = food_type,
+      color = food_type
+    ),
+    linetype = 1,
+    size = 1.1
+  ) +
+  ylim(c(-0.4,100.4)) +
+  ylab("Simulations") +
+  xlab("Description Type") +
+  labs(fill = "Food Type", # otherwise I get two legends
+       color = "Food Type") +
+  scale_x_discrete(labels = c("Neutral", "Context", "Sensory", "Health-positive")) + # rename the x axis after transforming it to numeric earlier
+  scale_color_manual(values = c("#009E73", "#0072B2", "#D55E00")) +
+  scale_fill_manual(values = c("#009E73", "#0072B2", "#D55E00")) +
+  theme_cowplot() +
+  theme(
+    text = element_text(
+      family="Century Gothic", # change font
+      size = 28
+    ), 
+    strip.background.x = element_blank(),
+    axis.text.x = element_text(
+      size = 22
+    ),
+    legend.title = element_text(
+      size = 22
+    ),
+    legend.text = element_text(
+      size = 22
+    )
+  )
+
+rc_plot_simulations_study2
+```
+
+## 2.3 Interaction plot
+Next, I plot the interaction between categorical and numerical variables.
+Contrary to the raincloud plots, where I plotted the raw data, the interaction plots are meant to illustrate the simple slope analyses.
+When plotting the raw data with a fitted line, this line will be fitted with `lm`.
+Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted based on mixed-effects models.
+```{r interaction_plots_simple_study2}
+# with simple slope and lm method (without SEs, because they'd be wrong)
+ggplot(study2 %>% 
+         filter(measure == "desire"),
+       aes(
+         x = meat_per_week, 
+         y = rating1,
+         color = food_type
+        )
+      ) + 
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+    ) + 
+  geom_point(alpha = 0.2) + 
+  ylim(0, 100) +
+  scale_color_manual(values = c("#009E73", "#D55E00")) +
+  theme_cowplot()
+```
+
+Therefore, I will fit the model-based means and the CIs based on the model-estimated SEs.
+
+As far as I know, there's no agreed-upon way to do this.
+The `effects` package has a built-in graph that models the fitted outcome for different levels of the predictor, including model-based SEs.
+
+I prefer to use `ggplot2`, so I'll get 5000 values of the predictor plus their fit and store them as a tibble.
+Got the idea from [here](https://www.r-bloggers.com/plotting-mixed-effects-model-results-with-effects-package/).
+I wrote all these steps into functions, see beginning of the script.
+
+To get the estimates from the models, I first need to import the models that I saved at the end of the analysis report.
+```{r interaction_model_mixed_effects_study2}
+# get models
+load(here("plots", "models", "models_study2.RData"))
+
+# the plot with the effects package
+plot(
+  effect("food_type:meat_per_week_s", 
+         h4_food_meat_model),
+         ci.style = "bands",
+  multiline = TRUE)
+```
+
+Plots for the interaction of meat-eating frequency and food type.
+```{r meat_frequency_interaction_study2}
+# get the data set
+h4_food_meat_effects <-
+  get_effects(
+    "food_type:meat_per_week_s",
+    h4_food_meat_model,
+    5000,
+    "food_type"
+  )
+
+# plot data
+h4_food_meat_plot <-
+  interaction_plot(
+    h4_food_meat_effects,
+    "meat_per_week_s",
+    "fit",
+    "food_type",
+    "Desire",
+    "Frequency of Eating Meat",
+    "Food Type"
+    )
+
+h4_food_meat_plot
+```
+
+# 3. Study 3
+
+## 3.1 Load and prepare data
+Next, I load the final data files from Study 3.
+I saved those at the end of the analysis report (`analysis_report_study3.Rmd`).
+```{r get_data_study3}
+study3 <- read_csv(here("data", "study3", "analysis_file.csv"))
+attractiveness <- read_csv(here("data", "study3", "attractiveness.csv"))
+simulations_study3 <- read_csv(here("data", "study3", "simulations.csv"))
+
+# reintroduce factors
+study3 <- 
+  study3 %>% 
   mutate_at(
     vars(pp, measure, food_type, label_type),
     list(~ as.factor(.))
@@ -1011,32 +1431,32 @@ study2 <-
 
 Now on to producing the 2x2 raincloud plot.
 I recode the factor just like above.
-```{r numeric_factor_study2}
-study2 <-
-  study2 %>% 
+```{r numeric_factor_study3}
+study3 <-
+  study3 %>% 
   mutate(
     label_type_n = if_else(label_type == "control", 1, 2),
     label_type_n = as.factor(label_type_n)
   )
 ```
 
-## 2.2 Raincloud plots
+## 3.2 Raincloud plots
 
 For means with 95%CI, I also need the summary statistics with within-subject standard errors.
 I'll get those with the `Rmisc` package.
 Note that I aggregate per participant first to make the CIs comparable to a repeated-measures ANOVA.
-```{r get_summary_study2}
+```{r get_summary_study3}
 # aggregate first
-aggregated <- 
-  study2 %>% 
+aggregated_study3 <- 
+  study3 %>% 
   group_by(pp, label_type, food_type, measure) %>% 
   summarize(
     rating = mean(rating, na.rm = TRUE)
   )
 
 # then get summary stats
-summary_stats <- summarySEwithin(
-  data = aggregated,
+summary_stats_study3 <- summarySEwithin(
+  data = aggregated_study3,
   measurevar = "rating",
   withinvars = c("label_type", "food_type", "measure"),
   idvar = "pp") %>% 
@@ -1056,10 +1476,10 @@ summary_stats <- summarySEwithin(
 ```
 
 Next, the raincloud plot.
-```{r make_it_rain}
-rc_plot_study2 <-
+```{r make_it_rain_study3}
+rc_plot_study3 <-
   ggplot(
-    study2 %>% 
+    study3 %>% 
       mutate(
         food_type = recode( # rename factor levels
           food_type,
@@ -1091,7 +1511,7 @@ rc_plot_study2 <-
              size = 1.2,
              alpha = 0.4) +
   geom_point( # the mean
-    data = summary_stats,
+    data = summary_stats_study3,
     aes(
       x = as.numeric(label_type_n)-.25, # same as above, moving it a bit to the left to be right between cloud and rain
       y = rating,
@@ -1101,12 +1521,12 @@ rc_plot_study2 <-
     size = 3
   ) +
   geom_errorbar( # error bars
-    data = summary_stats,
+    data = summary_stats_study3,
     aes(
       x = as.numeric(label_type_n)-.25,
       y = rating,
-      ymin = rating - 2,
-      ymax = rating + 2,
+      ymin = rating - se,
+      ymax = rating + se,
       color = food_type
     ),
     position = position_nudge(.25),
@@ -1114,7 +1534,7 @@ rc_plot_study2 <-
     size = 0.8
   ) +
   geom_line( # line connecting the means per group
-    data = summary_stats,
+    data = summary_stats_study3,
     aes(
       x = as.numeric(label_type_n),
       y = rating,
@@ -1151,59 +1571,16 @@ rc_plot_study2 <-
   ) + 
   facet_grid(. ~ measure)
 
-rc_plot_study2
+rc_plot_study3
 ```
 
-## 2.3 Interaction plots
-
-Next, I plot the interactions between categorical and numerical variables.
-Contrary to the raincloud plots, where I plotted the raw data, the interaction plots are meant to illustrate the simple slope analyses.
-When plotting the raw data with a fitted line, this line will be fitted with `lm`.
-Usually I prefer this "raw" approach, but it's not entirely accurate to represent the simple slope analyses we conducted based on mixed-effects models.
-```{r interaction_plots_simple}
-# with simple slope and lm method (without SEs, because they'd be wrong)
-ggplot(study2 %>% 
-         filter(measure == "attractiveness"),
-       aes(
-         x = change_diet, 
-         y = rating,
-         color = label_type
-        )
-      ) + 
-  geom_smooth(
-    method = "lm",
-    se = FALSE
-    ) + 
-  geom_point(alpha = 0.2) + 
-  ylim(0, 100) +
-  scale_color_manual(values = c("#009E73", "#D55E00")) +
-  theme_cowplot()
-```
-
-Therefore, I will fit the model-based means and the CIs based on the model-estimated SEs.
-
-As far as I know, there's no agreed-upon way to do this.
-The `effects` package has a built-in graph that models the fitted outcome for different levels of the predictor, including model-based SEs.
-
-I prefer to use `ggplot2`, so I'll get 5000 values of the predictor plus their fit and store them as a tibble.
-Got the idea from [here](https://www.r-bloggers.com/plotting-mixed-effects-model-results-with-effects-package/).
-I wrote all these steps into functions, see beginning of the script.
-
-To get the estimates from the models, I first need to import the models that I saved at the end of the analysis report.
-```{r interaction_model_mixed_effects}
-# get models
-load(here("plots", "models", "models.RData"))
-
-# the plot with the effects package
-plot(
-  effect("change_diet_s:food_type", 
-         h4_attr),
-         ci.style = "bands",
-  multiline = TRUE)
-```
+## 3.3 Interaction plots
 
 Plots for the interaction of intention to reduce eating meat and food type.
-```{r change_diet_food_type_interaction}
+```{r change_diet_food_type_interaction_study3}
+# get models
+load(here("plots", "models_study3", "models.RData"))
+
 # get the data set
 h4_effects <-
   get_effects(
@@ -1229,7 +1606,7 @@ h4_plot
 ```
 
 Plots for the interaction of frequency of eating meat and food type.
-```{r meat_frequency_food_type_interaction}
+```{r meat_frequency_food_type_interaction_study3}
 # get the data set
 exp_meat_effects <- 
   get_effects(
@@ -1255,7 +1632,7 @@ exp_meat_plot
 ```
 
 Plots for the interaction of frequency of eating meat and label type for plant-based foods.
-```{r meat_frequency_label_type_interaction}
+```{r meat_frequency_label_type_interaction_study3}
 # get the data set
 exp_meat_label_effects <- 
   get_effects(
@@ -1280,7 +1657,7 @@ exp_meat_label_plot <-
 exp_meat_label_plot
 ```
 
-# 3. Save plots
+# 4. Save plots
 Note: I don't save them because they are too large for Github.
 Also note that the wordclouds don't have a clean code solution for saving yet, see [here](https://github.com/Lchiffon/wordcloud2/issues/8).
 Those I just saved from the viewer pane manually.
@@ -1315,23 +1692,38 @@ tiff(here("plots", "figure3.tiff"), width = 879*8, height = 632*5, units = "px",
 food_type_plot
 dev.off()
 
-# study 2 raincloud
+# study 2 raincloud desire
 tiff(here("plots", "figure4.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
-rc_plot_study2
+rc_plot_desire_study2
 dev.off()
 
-# study 2 interaction h4
-ggsave(here("plots", "figure5.tiff"),
+# study 2 raincloud simulations
+tiff(here("plots", "figure5.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+rc_plot_simulations_study2
+dev.off()
+
+# study 2 interaction plot
+tiff(here("plots", "figure6.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+h4_food_meat_plot
+dev.off()
+
+# study 3 raincloud
+tiff(here("plots", "figure7.tiff"), width = 879*8, height = 632*8, units = "px", res = 600)
+rc_plot_study3
+dev.off()
+
+# study 3 interaction h4
+ggsave(here("plots", "figure8.tiff"),
        plot = h4_plot,
        dpi = 600)
 
-# study 2 exploratory plot 1
-ggsave(here("plots", "figure6.tiff"),
+# study 3 exploratory plot 1
+ggsave(here("plots", "figure9.tiff"),
        plot = exp_meat_plot,
        dpi = 600)
 
-# study 2 exploratory plot 2
-ggsave(here("plots", "figure7.tiff"),
+# study 3 exploratory plot 2
+ggsave(here("plots", "figure10.tiff"),
        plot = exp_meat_label_plot,
        dpi = 600)
 ```
