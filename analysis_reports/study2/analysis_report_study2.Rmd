@@ -1,0 +1,2370 @@
+---
+title: "Data Analysis Report Study 2"
+author: "Niklas Johannes"
+date: "5/14/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: default
+    highlight: default
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = TRUE, 
+                      warning = TRUE,
+                      cache = TRUE)
+```
+
+This file explains all data processing and analysis steps for **Using consumption and reward simulations to increase the appeal of plantbased foods**.
+The RProject has a private library in order to make all steps computationally reproducible.
+I use the `renv` package for this.
+That means you will need to install the package and run the `renv::restore` command, see instructions [here](https://github.com/rstudio/renv).
+This works best if you don't have the `library` and `staging` folder within the `renv` folder.
+```{r load_libraries}
+# pacman makes it easier to load and install packages
+if (!requireNamespace("pacman"))
+  install.packages("pacman")
+
+library(pacman)
+
+# load packages
+p_load(
+  Rmisc,
+  here,
+  tidyverse,
+  cowplot,
+  DT,
+  pastecs,
+  knitr,
+  lme4,
+  afex,
+  emmeans,
+  influence.ME,
+  MuMIn,
+  BayesFactor,
+  effects
+)
+
+# set seed
+set.seed(42)
+
+# set theme for ggplot
+theme_set(theme_cowplot())
+```
+
+```{r functions}
+### FUNCTION 1 ###
+# function that transforms feet and inches to cm
+feet_inches_to_cm <- 
+  function(feet, inches){
+    feet_to_cm <- feet * 30.48
+    inches_to_cm <- inches * 2.54
+    cm <- feet_to_cm + inches_to_cm
+    cm <- round(cm, digits = 0)
+    
+    return(cm)
+  }
+
+### FUNCTION 2 ###
+# function that transforms stones and pounds to kg
+stones_pounds_to_kg <-
+  function(pounds, stones=NULL){
+    if(missing(stones)){
+      pounds_to_kg <- pounds * 0.453592
+      kg <- pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+    else{
+      stones_to_kg <- stones * 6.35029
+      pounds_to_kg <- pounds * 0.453592
+      kg <- stones_to_kg + pounds_to_kg
+      kg <- round(kg, digits = 0)
+      
+      return(kg)
+    }
+  }
+
+### FUNCTION 3 ###
+# function that gives summary statistics and a densityplot, with different levels of repeated vs. trait-like measures
+describe_visualize <- 
+  function(df, 
+           variable, 
+           repeated_measure = FALSE,
+           want_summary = FALSE){
+    
+    variable <- enquo(variable)
+    
+    # specifies whether the variable we want to plot is a trait-like or repeated measure
+    if (repeated_measure == FALSE){
+      df <-
+        df %>%
+        group_by(pp) %>%
+        slice(1) %>% 
+        ungroup()
+    } else {
+      df <-
+        df
+    }
+    
+    # descriptive stats
+    sum_stats <-
+      df %>% 
+      pull(!! variable) %>% 
+      stat.desc()
+    
+    # plot
+    plot <-
+      ggplot(df, aes(x = !! variable)) +
+        geom_density(color = "darkgrey", fill = "darkgrey") +
+        geom_point(aes(x = !! variable, y = 0))
+    
+    # return the two (if both are wanted)
+    if(want_summary == TRUE){
+      return(list(kable(sum_stats), plot))
+    } else{
+      return(plot)
+    }
+  }
+
+### FUNCTION 4 ###
+# function that returns a table for trait-like categorical variables
+my_table <-
+  function(df, variable){
+    variable <- enquo(variable)
+    
+    df %>% 
+      group_by(pp) %>% 
+      slice(1) %>% 
+      pull(!! variable) %>% 
+      table()
+  }
+
+### FUNCTION 5 ###
+# raincloud plot function from https://github.com/RainCloudPlots/RainCloudPlots/blob/master/tutorial_R/R_rainclouds.R
+# Defining the geom_flat_violin function ----
+# Note: the below code modifies the
+# existing github page by removing a parenthesis in line 50
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @export
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        group_by(group) %>%
+        mutate(
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+
+    draw_group = function(data, panel_scales, coord) {
+      # Find the points for the line to go all the way around
+      data <- transform(data,
+        xminv = x,
+        xmaxv = x + violinwidth * (xmax - x)
+      )
+
+      # Make sure it's sorted properly to draw the outline
+      newdata <- rbind(
+        plyr::arrange(transform(data, x = xminv), y),
+        plyr::arrange(transform(data, x = xmaxv), -y)
+      )
+
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1, ])
+
+      ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+
+    draw_key = draw_key_polygon,
+
+    default_aes = aes(
+      weight = 1, colour = "grey20", fill = "white", size = 0.5,
+      alpha = NA, linetype = "solid"
+    ),
+
+    required_aes = c("x", "y")
+  )
+
+### FUNCTION 6 ###
+# creates raincloud plots
+rc_plot <-
+  function(
+    df,
+    measurement,
+    variable,
+    group,
+    xlab,
+    title,
+    facet = NULL
+  ) {
+    rc_plot <-
+    ggplot(
+      df %>%
+        filter(measure == measurement),
+      aes_string(
+        x = group,
+        y = variable,
+        fill = group,
+        color = group
+      )
+    ) +
+      geom_flat_violin(position = position_nudge(x = .2,
+                                                 y = 0),
+                       adjust = 2) +
+      geom_point(position = position_jitter(width = .15),
+                 size = .10) +
+      ylab("Rating (0-100)") +
+      xlab(xlab) +
+      coord_flip() +
+      guides(fill = FALSE,
+             color = FALSE) +
+      scale_color_brewer(palette = "Dark2") +
+      scale_fill_brewer(palette = "Dark2") +
+      ggtitle(title)
+    
+    if(!is.null(facet)){
+      rc_plot <-
+      rc_plot +
+        facet_wrap(facet)
+    }
+    
+    return(rc_plot)
+  }
+
+### FUNCTION 6 ###
+# creates line plots
+line_plot <-
+  function(
+    df,
+    x_group,
+    measure,
+    group_by
+  ) {
+    
+    measure <- enquo(measure)
+    
+    ggplot(df,
+           aes_string(
+             x = x_group,
+             y = measure,
+             group = group_by,
+             color = group_by,
+             linetype = group_by
+           )
+    ) +
+      geom_line() +
+      geom_point() +
+      geom_errorbar(
+        aes(
+          ymin = !! measure - se,
+          ymax = !! measure + se),
+        width = .05) +
+      scale_color_brewer(palette = "Dark2")
+  }
+
+### FUNCTION 7 ###
+# function that calculates proportion of residuals above a cut-off for an lmer object
+proportion_residuals <-
+  function(model, cut_off){
+    
+    # scale the model residuals
+    model_resid <- resid(model, scaled = TRUE)
+    
+    # take the absolute
+    model_resid <- abs(model_resid)
+    
+    # select those below cut_off and divide by total number of residuals
+    proportion <- sum(model_resid > cut_off) / length(model_resid)
+    
+    return(proportion)
+  }
+
+### FUNCTION 8 ###
+# shows the proportions from the above function in a table
+lmer_residuals <-
+  function(lmer_model){
+    
+    # proportion of scaled residuals that +- 2, 2.5, and 3
+    residuals_2 <- proportion_residuals(lmer_model, 2)
+    residuals_25 <- proportion_residuals(lmer_model, 2.5)
+    residuals_3 <- proportion_residuals(lmer_model, 3)
+    
+    # put those percentages into a tibble, add whether they pass a cut-off, and produce nice table
+    resid_proportions <-
+      tibble(
+        standardized_cutoff = c(2, 2.5, 3),
+        proportion_cutoff = c(.05, .01, .0001),
+        proportion = c(
+          residuals_2,
+          residuals_25,
+          residuals_3
+        ),
+        below_cutoff = proportion < proportion_cutoff
+      )
+    
+    print(resid_proportions)
+  }
+
+### FUNCTION 8 ###
+# function takes the formal outlier values on cook's distance from an lmer object and arranges them from highest to lowest
+arrange_cook <-
+  function(outliers, grouping_factor){
+    cooks.distance(outliers) %>% 
+      as_tibble(rownames = as.character(grouping_factor)) %>%
+      rename(cooks_distance = V1) %>% 
+      arrange(desc(cooks_distance)) %>% 
+      head()
+  }
+```
+
+# 1. Load and wrangle data
+## 1.1 Load data
+First, we load the data.
+For a codebook, see the [enter file name] file.
+Note that the Qualtrics output format is quite the nightmare for importing; found a solution [here](https://stackoverflow.com/questions/50314805/how-to-import-qualtrics-data-in-csv-format-into-r).
+```{r load_data}
+headers <- read_csv(
+  here("data", "study2", "raw_data.csv"),
+  col_names = FALSE,
+  n_max = 1) %>%
+  as.character() # variable names stored in a vector
+
+raw_data <- read_csv(
+  here("data", "study2", "raw_data.csv"),
+  col_names = headers, # use that name vector here to name variables
+  na = "",
+  skip = 3 # those are the three rows that contain the variable info
+  )
+
+rm(headers) # clear names from workspace
+
+nrow(raw_data) # how many people opened the survey
+```
+
+The data frame is extremely wide; we have `r ncol(raw_data)` variables.
+This has several reasons:
+
+* Qualtrics data are generally in the wide format, so each stimulus gets a column rather than a row
+* What label type was assigned to which food type for desire ratings was counterbalanced, such that there were four sets, each containing 40 variables (= 160 total)
+* Participants only answered one set, but all four sets are contained in the data, meaning that participants will have entries for one set of variables, but only NA for the other sets
+* Each stimulus was timed, meaning Qualtrics measured four additional variables per stimulus: first click, last click, number of clicks, and after how much time the page was submitted
+* This means there are 160 (the stimuli) plus 160 (the four sets) x 4 (timing variables) = `r 160 * 4` variables just for desire ratings (total `r 160*5` desire variables)
+* This entire procedure also applies to simulation ratings, but simulations had two rating items, meaning there will be 160 stimuli x 2 (number of items) + 160 x 4 (timing questions) = `r 160*6` doubling the number of stimulus rating variables (`r 160*5*2` total rating variables)
+* The remaining `r ncol(raw_data) - 160 * 11` are demographic etc. variables
+
+## 1.2 Wrangling
+We need to get these data into the long format.
+Before that, let's only keep those variables we need and simultaneously give them proper names.
+Also, the `response_id` already is a unique identifier, but not easy to read.
+I'll add a participant number (`pp`).
+
+Also, when reading in the raw data, `read_csv` gave a warning that there were duplicate column names.
+Namely, timing variables of the `pb_1_s_choice_time` trial are double.
+The second instance of those duplicate timing variables have been assigned a `_1` appendix.
+I checked the Qualtrics survey and the raw data and there's a typo in one of the variable names: The timing variables for the `pb_2_s_choice` trial are called `pb_1_s_choice`.
+Thus, `pb_1_s_choice_time_X` (X stands for the timing variable) should be `pb_2_s_choice_time_X`.
+`pb_1_s_choice_time_X_1` should be stripped of the `_1` suffix.
+I'll change that manually below.
+
+Last, because I'm cleaning the raw data, I'll use a new data object: `working_file`
+```{r select_and_rename}
+working_file <- 
+  raw_data %>% 
+  select(
+    start_date = StartDate,
+    end_date = EndDate,
+    preview = Status,
+    duration = `Duration (in seconds)`,
+    finished = Finished,
+    fullfil_criteria = InclusionConfirm,
+    consent = ConsentProceed,
+    group = CONDITION, # counterbalancing id
+    hungry = HungerThirst_1,
+    thirsty = HungerThirst_2,
+    desire_instructions_time = `DInstructionsTime_Page Submit`,
+    pb_1_n_choice_1:`mb_40_n_choice_Click Count`, # all desire variables
+    simulations_instructions_time = `SimInstructionsTime_Page Submit`,
+    pb_1_n_sim_1:`mb_40_n_sim_time_Click Count`, # all simulation variables
+    age = Age,
+    gender = Gender,
+    height_choice = HeightUnit,
+    height_cm = HeightCm_1,
+    height_feet = HeightFI_1,
+    height_inches = HeightFI_2,
+    weight_choice = WeightUnit,
+    weight_kilos = WeightKg_1,
+    weight_stones = WeightStones_1,
+    weight_pounds = WeightStones_2,
+    weight_pounds_only = WeightPounds_1,
+    diet = Diet,
+    diet_details = DietOther,
+    meat_per_week = meat_frequency,
+    change_diet = less_meat_intention_1,
+    allergies = Allergies,
+    allergies_details = AllergyDetails,
+    language_issues = LanguageComprehensio,
+    language_issues_details = LanguageDifficulties,
+    didnt_like = FoodPreference,
+    study_about = StudyAim,
+    technical_issues = TechnicalDifficultie,
+    -contains("Click"), # omit click count variables
+  ) %>%
+  rename(
+    `pb_2_s_choice_time_Page Submit` = `pb_1_s_choice_time_Page Submit`,
+    `pb_1_s_choice_time_Page Submit`= `pb_1_s_choice_time_Page Submit_1`
+  ) %>% 
+  mutate(pp = paste0("pp_", row_number())) %>%
+  select(# add participant number and set it as first column
+    pp,
+    everything()
+  )
+```
+
+When inspecting the data and variable names visually, I see that one section of timing variable wasn't named after the trial.
+The timing variable for `pb_6_c_choice` begins with `Q725`.
+I rename that timing variable.
+```{r rename_q725}
+working_file <-
+  working_file %>% 
+  rename(
+    pb_6_c_choice_time = `Q725_Page Submit`
+  )
+```
+
+Next, I assign the correct variable type.
+In addition, I exported the Qualtrics data with numbers as output, so I will reintroduce the factor levels for factor variables.
+```{r change_types}
+working_file <-
+  working_file %>% 
+  mutate_at(
+    vars(
+      pp,
+      preview,
+      finished:group,
+      gender,
+      height_choice,
+      weight_choice,
+      diet,
+      allergies,
+      language_issues
+    ),
+    list(~ as.factor(.))
+  ) %>% 
+  mutate(
+    preview = fct_recode(
+      preview,
+      yes = "1",
+      no = "0"
+    ),
+    finished = fct_recode(
+      finished,
+      no = "0",
+      yes = "1"
+    ),
+    gender = fct_recode(
+      gender,
+      male = "1",
+      female = "2",
+      other = "3"
+    ),
+    diet = fct_recode(
+      diet,
+      omnivore = "1",
+      pescatarian = "2",
+      vegetarian = "3",
+      vegan = "4",
+      other = "5"
+    ),
+    height_choice = fct_recode(
+      height_choice,
+      cm = "1",
+      feet_inches = "2"
+    ),
+    weight_choice = fct_recode(
+      weight_choice,
+      kg = "1",
+      stones_pounds = "2",
+      pounds_only = "3"
+    )
+  ) %>% 
+  mutate_at(
+    vars(
+      fullfil_criteria,
+      consent,
+      allergies,
+      language_issues
+    ),
+    list(
+      ~ fct_recode(
+        .,
+        yes = "1",
+        no = "2"
+      )
+    )
+  )
+```
+
+Because the study was conducted in the UK, we need to transform height and weight to cm and kg, respectively.
+```{r transform_height_weight}
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = case_when(
+      height_choice == "cm" ~ height_cm,
+      height_choice == "feet_inches" ~ feet_inches_to_cm(height_feet, height_inches)
+    ),
+    weight_kilos = case_when(
+      weight_choice == "kg" ~ weight_kilos,
+      weight_choice == "stones_pounds" ~ stones_pounds_to_kg(weight_pounds, weight_stones),
+      weight_choice == "pounds_only" ~ stones_pounds_to_kg(weight_pounds_only) 
+    )
+  )
+```
+
+Now that the data are cleaned, I can finally transform them to the long format.
+Currently, the measurements of desire and simulations are in the following format: **pb_1_n_choice_1**. The components (separated by underscores) of that format mean:
+
+* **food type**: pb (plant-based) or mb(meat-based)
+* **stimulus number**
+* **label type**: n (neutral), s (sensory), c (contextual), h (health-positive)
+* **measurement/DV**: choice (desire) or sim (simulations)
+* Number of the item/time: always `_1` for desire items, `_1` and `_2` for simulation items
+
+Let's remove the `Page Submit` appendices from their variable names.
+Some trials don't have a `time` suffix before the `Page Submit` suffix, because the `time` suffix wasn't added during coding.
+Instead, they have a format like this `pb_7_s_sim_Page Submit`.
+Therefore, I first remove `Page Submit` from all variables that already have a `time` identifier in the name, and then replace `Page Submit` with `time` for those who don't have a `time` identifier already.
+```{r remove_page_submit}
+working_file <-
+  working_file %>% 
+    rename_at(
+    vars(
+      ends_with("time_Page Submit")
+    ),
+    list(
+      ~ str_replace(
+        ., "_Page Submit", ""
+      )
+    )
+  ) %>% 
+  rename_at(
+    vars(
+      ends_with("Page Submit")
+    ),
+    list(
+      ~ str_replace(
+        ., "Page Submit", "time"
+      )
+    )
+  )
+```
+
+Here, I make sure there are no more "Page Submits" in any of the variable names.
+Weirdly, Qualtrics gave one variable a `_1` appendix, which is why the previous command missed the `Page Submit`.
+This variable seems to be a duplicate: `pb_1_s_choice` has two `Page Submit` variables, but only one of them (with the `_1` appendix) is on the same line as the scores on `pb_1_s_choice_1`.
+My guess it that this variable is left over from a test run, after which the Qualtrics survey was changed slightly.
+I'll remove the double `Page Submit` and maintain and rename the correct one.
+```{r check_page_submit}
+# check
+working_file %>% 
+  select(contains("Page Submit")) %>% 
+  names()
+
+# inspect that trial
+working_file %>% 
+  select(starts_with("pb_1_s_choice"))
+```
+
+## 1.3 Tidy data
+Let's get to turning the data into the long format.
+Because we used four sets of stimuli (counterbalancing what stimulus belongs to what food type and label type), one quarter of the participants gave responses to a quarter of the measurement variables; the other three quarters of participant gave responses to the other three quarters.
+
+Therefore, participants will have missing values on those variables that belonged to the other sets (i.e., the other counterbalancing conditions).
+Luckily, the `pivot_longer` function is amazing, so we can drop those measurements per participants with the `values_drop_na` argument.
+This command has the nice side effect of also excluding those who did not consent to participate (because they have NAs everywhere.)
+
+In their current form, the trial variable names contain information about food type, stimulus number, label type, and the measure (choice = desire vs. simulations). Moreoever, the last appendix to the variable name (`_1`/`_2`/`time`) tells us whether the variable contains a rating for the first item or second item or the timing variable.
+I first turn these data into the long format, such that the new `type` variable tells us what the `value` variable is for.
+
+Then, I spread the `type` and `value` variables, such that we follow tidy conventions: Each row is one observation (aka trial).
+A trail where desire was measured gets its own row and a trial where simulations were measured gets its own row.
+Both rows will contain the value of the rating on either one item (desire) or two items (simulations), plus a value for time on that trial.
+```{r turn_long}
+working_file <- 
+  
+  # turn into long format
+  working_file %>% 
+  pivot_longer(
+    cols = c(contains("pb_"), contains("mb_")),
+    names_to = c( # specificy the variables to be formed from the current variable names
+      "food_type", 
+      "stimulus_no",
+      "label_type",
+      "measure",
+      "type" # what type is the measurement, item number 1, item number 2, or time?
+      ),
+    values_to = c( # the values, which will be item number (1 or 2) and the timer per trial
+      "value"
+      ),
+    names_sep = "_",
+    values_drop_na = TRUE # do not include empty entries due to counterbalancing as rows in the long format
+  ) %>%
+  
+  # then spread the type and value variables
+  pivot_wider(
+    names_from = "type",
+    values_from = "value"
+  ) %>% 
+
+  # give proper variable names, labels, and variable types
+  mutate(
+    stimulus_no = as.numeric(stimulus_no)
+  ) %>% 
+  mutate(
+    food_type = fct_recode(
+      as.factor(food_type),
+      meat_based = "mb",
+      plant_based = "pb",
+    ), # (neutral), s (sensory), c (contextual), h (health-positive)
+    label_type = fct_recode(
+      as.factor(label_type),
+      contextual = "c",
+      health_positive = "h",
+      neutral = "n",
+      sensory = "s"
+    ),
+    measure = fct_recode(
+      as.factor(measure),
+      desire = "choice",
+      simulations = "sim"
+    )
+  ) %>%
+  rename(
+    rating1 = "1",
+    rating2 = "2"
+  ) %>% 
+  select( # arbitrary, but I like to order the variables roughly in the order they were collected
+    pp:simulations_instructions_time,
+    food_type:rating1,
+    rating2,
+    time,
+    everything()
+  )
+```
+
+Last, I load the food items and add them to the working file.
+```{r add_food}
+foods <- 
+  read_csv(
+    here("data", "study2", "food_items.csv"),
+    col_types = list("f", "n", "f")
+  )
+
+working_file <- 
+  left_join(
+    working_file,
+    foods,
+    by = c("food_type", "stimulus_no")
+  ) %>% 
+  mutate( # joining turned food type into character
+    food_type = as.factor(food_type)
+  ) %>% 
+  select(
+    pp:stimulus_no,
+    food,
+    everything()
+  )
+```
+
+Alright, the data are in a tidy format.
+Below, I show the data of a random participant for illustration.
+```{r tidy_data, echo=FALSE}
+DT::datatable(
+  working_file %>% 
+    filter(pp == "pp_10"),
+  options = list(
+    autoWidth = TRUE,
+    scrollY = TRUE,
+    scrollX = TRUE, 
+    pageLength = 5
+  )
+  ) 
+```
+
+# 2. Exclusions
+
+## 2.1 Exclude test runs
+There are still a couple of test runs left.
+We exclude them by deselecting preview entries.
+```{r exclude_test_runs}
+# before excluding testruns
+length(unique(working_file$pp))
+
+working_file <- 
+  working_file %>% 
+  filter(preview == "no")
+
+# after exclusion
+length(unique(working_file$pp))
+```
+
+## 2.2 Exclude incomplete surveys
+Now exclude those who didn't finish the survey.
+```{r exclude_nonfinished}
+length(unique(working_file$pp))
+
+working_file <-
+  working_file %>% 
+  filter(finished == "yes")
+
+length(unique(working_file$pp))
+```
+
+Out of experience, Qualtrics isn't very good at determining whether a survey is finished or not.
+We double check this: If indeed all participants gave all ratings, there should be 80 rows for each of the remaining `r length(unique((working_file$pp)))` participants: 40 desire rows and 40 simulations rows (the simulation rows have two ratings).
+Furthermore, there should be few, if any, `NA`s remaining on any of the ratings.
+And indeed, there're no unexpected missing values.
+The missings on `rating2` result from half the rows (the desire trials) only having on item, so 171 participants x 40 desire rows = `r 171*40`
+```{r check_total_n}
+# does each participant have 80 rows?
+working_file %>% 
+  group_by(pp) %>% 
+  count() %>%
+  ungroup() %>% 
+  summarize(
+    all_there = sum(n == 80) == length(unique(working_file$pp))
+  )
+
+# are there NAs left on the rating or timing variables?
+working_file %>% 
+  select(rating1, rating2, time) %>% 
+  summarize_all(
+    list(~ sum(is.na(.)))
+  )
+```
+
+## 2.3 Response patterns
+
+Next I check for response patterns (aka those who were "straightlining" and have little to no variance in their ratings.)
+
+Participant `pp_76` has zero variance on their ratings, which is suspicious.
+Three more participants have an SD of less than two, which is rather low for a 100 VAS scale.
+Two participants gave the same response on 90% of trials.
+```{r check_response_patterns}
+sd_per_group <- 
+  working_file %>% 
+  group_by(pp, measure) %>% 
+  summarize_at(
+    vars(
+      rating1, rating2
+    ),
+    list(mean, sd, min, max)
+  )
+
+# check lowest sd for rating 1
+sd_per_group %>%  
+  arrange(rating1_fn2)
+
+# check lowest sd for rating 2
+sd_per_group %>% 
+  arrange(rating2_fn2)
+
+# check whether anyone selected a VAS value more than 90% of the time
+working_file %>% 
+  group_by(pp, measure) %>% 
+  count(rating1) %>% 
+  filter(n > 40*0.9)
+
+working_file %>%
+  filter(measure == "simulations") %>% 
+  group_by(pp) %>% 
+  count(rating2) %>% 
+  filter(n > 40*0.9)
+```
+
+I'll inspect those four participants more closely by plotting their responses.
+Based on the response patterns, it looks like the four participants ran out of patience during the second part of the study.
+Their responses have a healthy spread when rating desire, but gets extremely narrow when rating the two simulation ratings.
+I think these respondents might just have been clicking through, especially `pp_76` who selected the maximum value on the scale.
+```{r graph_response_patterns}
+ggplot(working_file %>% filter(pp %in% c("pp_76", "pp_168", "pp_164", "pp_64")), aes(x = rating1)) +
+  geom_density(color = "darkgrey", fill = "darkgrey") +
+  geom_point(aes(x = rating1, y = 0)) +
+  facet_grid(measure ~ pp)
+
+ggplot(working_file %>% filter(pp %in% c("pp_76", "pp_168", "pp_164", "pp_64")) %>% filter(measure == "simulations"),
+       aes(x = rating2)) +
+  geom_density(color = "darkgrey", fill = "darkgrey") +
+  geom_point(aes(x = rating2, y = 0)) +
+  facet_wrap(~ pp)
+```
+
+Based on the graph and the info above, I'll exclude `pp_76` in line with the preregistration.
+```{r exclude_response_patterns}
+working_file <- 
+  working_file %>% 
+  filter(!pp %in% c("pp_76"))
+```
+
+## 2.4 Don't fulfill inclusion
+Here we check whether participants indeed fulfill the inclusion criteria.
+The criteria were:
+
+* living in the UK
+* 18-70 years old
+* omnivores
+* no current or history of eating disorder
+* not on a diet
+
+Eight participants indicate that they're not omnivores, despite saying so in the intro.
+When we look at their meat consumption, all but two eat meat despite not calling themselves omnivores.
+It's hard to tell what to do with those two participants: they said they fulfilled the inclusion criteria, but apparently don't eat meat that often.
+I'll run the analyses with and without them (`pp_77` and`pp_87`).
+```{r check_inclusion_criteria}
+# check whether participants themselves said they were fulfilling the criteria
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  pull(fullfil_criteria) %>% 
+  table()
+
+# check age
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  summarize(
+    lower_range = min(age),
+    upper_range = max(age)
+  )
+
+# check diet
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  count(diet)
+
+# let's check their meat consumption
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  filter(diet != "omnivore") %>% 
+  select(pp, diet, diet_details, meat_per_week)
+```
+
+## 2.5 Check for rushed responses
+
+Next, I want to see whether any participants rushed through the survey (not preregistered).
+If anyone spent only a half a second per trial, I wouldn't take their data seriously.
+The fastest participant still spent about three seconds on each trial, which I don't find problematic.
+```{r rushed_responses}
+time_means <- 
+  working_file %>% 
+  group_by(pp) %>% 
+  summarize(
+    mean_rt = mean(time),
+    sd_srt = sd(time)
+  ) %>% 
+  arrange(mean_rt)
+
+# plot response time
+time_means %>% 
+  ggplot(aes(x = mean_rt)) +
+  geom_density(color = "darkgrey", fill = "darkgrey") +
+  geom_point(aes(x = mean_rt, y = 0))
+```
+
+# 3. Describe and visualize
+
+## 3.1 Meta-data
+How long did participants spend on the survey?
+Median duration is around ~ 15 minutes.
+```{r describe_duration}
+describe_visualize(
+  working_file,
+  duration,
+  FALSE,
+  TRUE
+)
+```
+
+How long did they spend on the instructions for the desire and simulation ratings, respectively?
+Overall not long (~ 15 seconds), but some apparently left the browser window open for quite some time.
+```{r describe_instructions}
+describe_visualize(
+  working_file,
+  desire_instructions_time,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  simulations_instructions_time,
+  FALSE,
+  TRUE
+)
+```
+
+Were there language issues?
+Barely, and the qualitative answers don't give cause for concern.
+```{r describe_language}
+my_table(working_file, language_issues)
+
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  filter(language_issues == "yes") %>% 
+  pull(language_issues_details)
+```
+
+## 3.2 Demographic information
+First, I look at hunger and thirst ratings.
+Participants seemed to be more thirsty than hungry.
+```{r describe_hunger_thirst}
+describe_visualize(
+  working_file,
+  hungry,
+  FALSE,
+  TRUE
+)
+
+describe_visualize(
+  working_file,
+  thirsty,
+  FALSE,
+  TRUE
+)
+```
+
+What is the gender distribution in our sample?
+Mostly women.
+```{r describe_gender}
+my_table(working_file, gender)
+```
+
+Age distribution.
+```{r describe_age}
+describe_visualize(
+  working_file,
+  age,
+  FALSE,
+  TRUE
+)
+```
+
+What's the height distribution?
+One participant indicated 1.76 cm height, which clearly is meant to be 176.
+I change that manually.
+Another participant didn't want to provide their height (has both height and weight at 0), so I'll set those to `NA`.
+```{r describe_height}
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  filter(height_cm < 150) %>% 
+  select(pp, height_choice, height_cm, weight_choice, weight_kilos)
+
+# recode one participant and set the other one to NA
+working_file <-
+  working_file %>% 
+  mutate(
+    height_cm = case_when(
+      height_cm == 1.76 ~ 176,
+      height_cm == 0 ~ NA_real_,
+      TRUE ~ height_cm
+    ),
+    weight_kilos = if_else(weight_kilos == 0, NA_real_, weight_kilos)
+  )
+
+describe_visualize(
+  working_file,
+  height_cm,
+  FALSE,
+  TRUE
+)
+```
+
+Let's look at the weight.
+There's one participant who indicated to weigh 38 kilos.
+Most participants who weight less than 50kg also have below average height, so I'm reluctant to set values to `NA` here.
+```{r describe_weight}
+describe_visualize(
+  working_file,
+  weight_kilos,
+  FALSE,
+  TRUE
+)
+
+working_file %>% 
+  filter(weight_kilos < 50) %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(pp, weight_kilos, height_cm)
+```
+
+Next, some information about their diet.
+
+* participants seem to be divided on whether they're trying to change their diet
+* frequent meat eaters
+* a few allergies
+```{r describe_diet}
+# how often they eat meat per week
+describe_visualize(
+  working_file,
+  meat_per_week,
+  FALSE,
+  TRUE
+)
+
+# to what extent participants are currently trying to change their diets
+describe_visualize(
+  working_file,
+  change_diet,
+  FALSE,
+  TRUE
+)
+
+# whether participants have food allergies
+my_table(working_file, allergies)
+
+# details of allergies
+working_file %>% 
+  group_by(pp) %>% 
+  slice(1) %>% 
+  filter(allergies == "yes") %>% 
+  select(pp, allergies_details)
+```
+
+## 3.3 Ratings
+Next, I visualize the ratings on desire and simulations, respectively.
+I'll first visualize and describe them overall, then per factor level (as in two main effects of label type and food type), and then the interaction.
+
+### 3.3.1 Desire
+First, I inspect the overall desire ratings, regardless of label or food type.
+The question wording might have invited participants to think about the answers almost in a binary way.
+We'll need to check the model diagnostics later.
+```{r desire_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "desire"),
+  rating1,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with ratings per label type.
+Doesn't look like there's much of a difference, but hard to tell without means and SEs.
+The descriptives show small differences, in the range of two to three scale points.
+```{r describe_desire_label_type}
+rc_plot(
+  working_file,
+  "desire",
+  "rating1",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Desire Ratings"
+  )
+
+# raw means and SDs (without taking grouping by PP into account)
+working_file %>% 
+  filter(measure == "desire") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating1, na.rm = TRUE),
+    sd = sd(rating1, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "desire") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating1, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Let's inspect the ratings per food type.
+People seem to like meat-based labels more.
+```{r describe_desire_food_type}
+rc_plot(
+  working_file,
+  "desire",
+  "rating1",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Desire Ratings"
+  )
+
+# raw means and SDs
+working_file %>% 
+  filter(measure == "desire") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating1, na.rm = TRUE),
+    sd = sd(rating1, na.rm = TRUE)
+  )
+
+# aggregated means and SDs
+working_file %>% 
+  filter(measure == "desire") %>% 
+  group_by(pp, food_type) %>%
+  summarize(mean_agg = mean(rating1, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Next, I inspect the interaction of label type and food type for desire ratings.
+The raincloud plots are not that easy to read unless I add CI and etc., so for a quicker visualization I use a line plot on the aggregated means with within-subject standard error (from the `Rmisc::summarySEwithin` function).
+
+Just by inspecting the plot, it looks like there are two main effects, but no interactions:
+Meat-based foods are generally more desirable than plant-based foods and the differences between label types are very similar for each food type.
+```{r describe_desire_interaction}
+rc_plot(
+  working_file,
+  "desire",
+  "rating1",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Desire Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_desire <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "desire") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating1 = mean(rating1, na.rm = TRUE)),
+    measurevar = "rating1",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at means and SDs
+summary_desire
+
+# line graph
+line_plot(
+  summary_desire,
+  "label_type",
+  rating1,
+  "food_type"
+)
+```
+
+Last, I want to see variance by `pp` and by `food`.
+The boxplots show that there is quite a lot of variation for both factors, which is why we should model them as random effects.
+```{r desire_by_pp}
+ggplot(
+  working_file %>% filter(measure == "desire"),
+  aes(
+    x = pp,
+    y = rating1
+  )
+) +
+  geom_boxplot()
+```
+
+```{r desire_by_food}
+ggplot(
+  working_file %>% filter(measure == "desire"),
+  aes(
+    x = food,
+    y = rating1
+  )
+) +
+  geom_boxplot()
+```
+
+
+### 3.3.2 Simulations
+We had two items for simulations, `rating1` and `rating2`.
+In the preregistration we said that we would take their mean (aka combine them into one rating) if they were highly correlated (i.e., > r = .60).
+So let's check those correlations first.
+
+They are right at the threshold that we specified.
+If we take the correlation between ratings on each trial, it's .59.
+If we aggregate by participant first, it's .63.
+I think together with the conceptual similarity, this is justification enough to combine them into one rating (plus, it makes it much easier to interpret one model compared to two models, one for each item).
+```{r check_simulation_correlations}
+# on the entire data (so per trial)
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  summarize(
+    raw_r = cor(rating1, rating2)
+  )
+
+# aggregating ratings per participant first
+working_file %>%
+  filter(measure == "simulations") %>% 
+  group_by(pp) %>% 
+  summarize(
+    rating1_mean = mean(rating1),
+    rating2_mean = mean(rating2)
+  ) %>% 
+  summarize(
+    aggregated_r = cor(rating1_mean, rating2_mean)
+  )
+
+# combine them into one rating
+working_file <- 
+  working_file %>% 
+  mutate(
+    rating3 = (rating1 + rating2) / 2
+  ) %>% 
+  select(
+    pp:rating2,
+    rating3,
+    everything()
+  )
+```
+
+First, I inspect the overall simulation ratings, regardless of label or food type.
+Simulations, overall, have higher mean ratings than desire and is less pronounced at the zero and 100 values.
+```{r simulations_overall}
+describe_visualize(
+  working_file %>% 
+    filter(measure == "simulations"),
+  rating3,
+  TRUE,
+  TRUE
+)
+```
+
+Next, a raincloud plot with ratings per label type.
+Again, the differences between conditions are rather small.
+```{r describe_simulations_label_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating3",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Simulation Ratings"
+  )
+
+# raw means and SDs (without taking grouping by PP into account)
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(rating3, na.rm = TRUE),
+    sd = sd(rating3, na.rm = TRUE)
+  )
+
+# means (unchanged) and SDs after aggregated per participant (to make it comparable to RM ANOVA)
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating3, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Let's inspect the ratings per food type.
+Again, participants seemed to simulate more for meat-based foods.
+```{r describe_desire_food_type}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating3",
+  "food_type",
+  "Food Type",
+  "Raincloud Plot of Food Simulation Ratings"
+  )
+
+# raw means and SDs
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(rating3, na.rm = TRUE),
+    sd = sd(rating3, na.rm = TRUE)
+  )
+
+# aggregated means and SDs
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, food_type) %>%
+  summarize(mean_agg = mean(rating3, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(food_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
+```
+
+Next, line plots to inspect possible interactions. 
+Again, the plot seems to show two main effects: plant-based foods elicit more simulations than plant-based foods and the pattern for label type is similar.
+There might be a difference for sensoty labels which doesn't increase compared to neutral labels in the plant-based condition, but does increase in the meat-based condition.
+```{r describe_desire_interaction}
+rc_plot(
+  working_file,
+  "simulations",
+  "rating3",
+  "label_type",
+  "Label Type",
+  "Raincloud Plot of Food Simulation Ratings",
+  "food_type"
+  )
+
+# get summary statistics
+summary_simulations <-
+  summarySEwithin(
+    data = working_file %>%
+      filter(measure == "simulations") %>%
+      group_by(pp, label_type, food_type) %>%
+      summarize(rating3 = mean(rating3, na.rm = TRUE)),
+    measurevar = "rating3",
+    withinvars = c("label_type", "food_type"),
+    idvar = "pp"
+  )
+
+# have a look at means and SDs
+summary_simulations
+
+# line graph
+line_plot(
+  summary_simulations,
+  "label_type",
+  rating3,
+  "food_type"
+)
+```
+
+What's the correlation between desire and simulations?
+```{r desire_simulations_cor}
+working_file %>%
+  filter(measure == "desire") %>% 
+  select(pp, food, food_type, label_type, stimulus_no, rating1) %>% 
+  rename(desire = rating1) %>% 
+  left_join(
+    .,
+    working_file %>% 
+      filter(measure == "simulations") %>% 
+      select(pp, food, food_type, label_type, stimulus_no, rating3) %>% 
+      rename (simulations = rating3)
+  ) %>% 
+  summarize(
+    r = cor(simulations, desire)
+  )
+  
+```
+
+Last, I want to see variance again by `pp` and by `food`.
+The boxplots show that there is quite a lot of variation for both factors, which is why we should model them as random effects.
+```{r simulations_by_pp}
+ggplot(
+  working_file %>% filter(measure == "simulations"),
+  aes(
+    x = pp,
+    y = rating3
+  )
+) +
+  geom_boxplot()
+```
+
+```{r simulations_by_food}
+ggplot(
+  working_file %>% filter(measure == "simulations"),
+  aes(
+    x = food,
+    y = rating3
+  )
+) +
+  geom_boxplot()
+```
+
+# 4. Analysis
+Now I move on to the analysis.
+**Note that I deviate from the preregistration here.**
+The preregistration specified two repeated-measures ANOVAs, one for desire and one for simulations, as well as separate t-tests within the plant-based condition.
+I deviate here by fitting a mixed-effects models to account for variance by participant and by food item
+
+I'll structure the analysis section into confirmatory (testing hypotheses) and exploratory (robustness checks and secondary predictions.)
+
+Here the hypotheses:
+
+1. For plant-based foods, sensory labels will lead to increased simulation ratings and desire 
+compared to neutral labels.
+2. For plant-based foods, context labels will lead to increased simulation ratings and desire 
+compared to neutral labels. 
+3. For plant-based foods, health-positive labels will lead to similar simulation and desire 
+ratings as neutral labels (Bayes factors supporting the null hypothesis of no difference 
+between labels). 
+4. Across label conditions, meat-based foods will be rated as more desirable than plant-
+based foods, especially for people who eat meat more often. 
+5. Sensory and context labels will increase desire more for plant-based than for meat-based 
+foods, compared to control labels. 
+6. The intention to reduce meat will correlate with desire for the plant-based foods.
+
+This is all quite complicated, so I'll go model by model.
+The first three hypotheses can be tested in two models that predict desire and simulations with `label_type`, and then doing posthoc tests to compare the effects.
+For the fourth hypothesis I'll run a model predicting desire with the interaction of `food_type` and `meat_per_week`.
+For the fifth hypothesis, I'll predict desire with the interaction of `label_type` and `food_type`.
+For the sixth hypothesis, I'll predict desire for plant-based foods with the intention to reduce eating meat.
+
+Desire and simulations are conceptually related.
+That means we should control our error rate.
+In total, we'll predict one of those two dependent measures in five models, so we'll adjust our alpha to `r 0.05/5`.
+
+It'll also make it easier to separate the working file into two separate files for desire and simulations.
+```{r split_working_file}
+desire <- 
+  working_file %>% 
+  filter(measure == "desire")
+
+simulations <- 
+  working_file %>% 
+  filter(measure == "simulations")
+```
+
+## 4.1 Main effect of labels on desire for plant-based foods
+
+### 4.1.1 Confirmatory
+First, I build the mixed-effects model for desire, predicted by `label_type` for plant-based foods only.
+I follow a maximum random effects structure.
+We counterbalanced which food was assigned to what label type across participants.
+Therefore, we will model `label_type` as random slope for the `food` grouping.
+
+`pp` also contains each combination of `label_type` because the experiment was within-subjects.
+That means we need to include the effect of `label_type` as a random slope nested in `pp`.
+I use sum-to-zero contrasts because they help with model convergence.
+
+The model has problems converging and gives a singular fit warning.
+It's not clear where the model hits the boundary, as there are no random effects that are close to zero or one, except the correlation of the food intercept with label type 1, which is one.
+Inspecting the thetas shows that the random slope of one label is estimated very close to zero.
+```{r h1_desire_model}
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# get a plants-only data set
+desire_plants <- 
+  desire %>% 
+  filter(food_type == "plant_based") %>% 
+  mutate(food_type = droplevels(food_type))
+
+# construct model
+h1_desire_model <- lme4::lmer(
+  rating1 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_desire_model)
+
+# check smallest parameter
+getME(h1_desire_model,"theta")
+
+isSingular(h1_desire_model, tol = 1e-5)
+```
+
+Therefore, it's probably a good idea to remove random correlation within the `food` factor to see whether that helps with singularity.
+It doesn't: Now the model cannot estimate a variance around the slope for label1 within `food`.
+```{r h1_desire_model_no_food_corr}
+# construct model
+h1_desire_model_no_food_corr <- lmer_alt(
+  rating1 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type || food),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_desire_model_no_food_corr)
+
+# check smallest parameter
+getME(h1_desire_model_no_food_corr,"theta")
+
+isSingular(h1_desire_model_no_food_corr, tol = 1e-5)
+```
+
+I try removing the random correlations for `pp`, but that leads to more problems.
+```{r h1_desire_model_no_pp}
+# construct model
+h1_desire_model_no_pp_corr <- lmer_alt(
+  rating1 ~
+    label_type +
+    (1 + label_type || pp) +
+    (1 + label_type | food),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_desire_model_no_pp_corr)
+
+# check smallest parameter
+getME(h1_desire_model_no_pp_corr,"theta")
+
+isSingular(h1_desire_model_no_pp_corr, tol = 1e-5)
+```
+
+Next, I see whether changing the optimizer can help and whether estimates are stable across optimizers.
+Not all optimizers converge, which isn't a good sign.
+Also, those that do converge show quite some discrepancies between their random effects.
+```{r h1_desire_model_all_fit}
+h1_desire_model_all <- afex::all_fit(
+  h1_desire_model,
+  maxfun = 1e9
+)
+
+# which ones converged
+ok_fits <- sapply(h1_desire_model_all, is, "merMod")
+ok_fits
+
+# was fit okay?
+!sapply(h1_desire_model_all, inherits, "try-error")
+
+# compare fixed effects
+ok_fits_details <- h1_desire_model_all[ok_fits]
+t(sapply(ok_fits_details, "fixef"))
+
+# compare random effects
+t(sapply(ok_fits_details, getME, "theta"))
+```
+
+It might be time to further simplify the model to get it to converge.
+Before I begin removing slopes, I'll first run the model without a random intercept for `food` and without correlations between random effects.
+Still there are convergence issues.
+```{r h1_desire_model_no_intercept}
+# construct model
+h1_desire_model_no_intercept <- lmer_alt(
+  rating1 ~
+    label_type +
+    (1 + label_type || pp) +
+    (0 + label_type || food),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+summary(h1_desire_model_no_intercept)
+
+isSingular(h1_desire_model_no_intercept, tol = 1e-5)
+```
+
+Because the random slopes for `label_type` within `food` seemed to lead to singular fit, I'll remove that slope.
+However, that prevents us from generalizing to other foods (if there is an effect) and p-values for the effect of `label_type` become less conservative.
+The model doesn't converge.
+```{r h1_desire_model_no_slope}
+# construct model
+h1_desire_model_no_slope <- lme4::lmer(
+  rating1 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 | food),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+summary(h1_desire_model_no_slope)
+```
+
+Last, I'll remove the entire `food` term.
+The model still runs into boundary problems.
+```{r h1_desire_model_no_food}
+# construct model
+h1_desire_model_no_food <- lme4::lmer(
+  rating1 ~
+    label_type +
+    (1 + label_type | pp),
+  desire_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+summary(h1_desire_model_no_food)
+
+# check smallest parameter
+getME(h1_desire_model_no_food,"theta")
+
+isSingular(h1_desire_model_no_food, tol = 1e-5)
+```
+
+The next step would be to remove the slope for `pp`, but that removal would increase our Type I error chance and lead to dramatically wrong p-values.
+Instead, I'll run a repeated-measures ANOVA.
+```{r desire_anova}
+desire_anova <- 
+  aov_ez(
+    id = "pp", 
+    dv = "rating1", 
+    data = desire_plants, 
+    within = "label_type"
+  )
+
+anova(desire_anova)
+```
+
+The diagnostics look okay.
+```{r desire_anova_diagnostics}
+# get the residuals and add the pp identifier
+anova_residuals <- as_tibble(desire_anova$lm$residuals) %>%
+  mutate(pp = row_number()) %>%
+  select(pp, everything())
+
+# inspect residuals
+densityplot(scale(anova_residuals$contextual, scale = TRUE))
+densityplot(scale(anova_residuals$health_positive, scale = TRUE))
+densityplot(scale(anova_residuals$neutral, scale = TRUE))
+densityplot(scale(anova_residuals$sensory, scale = TRUE))
+```
+
+
+### 4.1.2 Exploratory
+The main effect isn't significant, but I'll inspect the post-hoc tests out of curiousity: all comparisons are nonsignificant.
+```{r desire_anova_posthocs}
+desire_anova_posthocs <- 
+  emmeans(
+    desire_anova,
+    pairwise ~ label_type
+  )
+
+desire_anova_posthocs
+```
+
+To quantify evidence for the null, I'll also run a Bayesian ANOVA.
+There's strong evidence for the null.
+Usually I'd also conduct robustness checks, but there were no outliers in the model diagnostics.
+```{r desire_anova_bayes}
+desire_anova_bayes <- 
+  anovaBF(
+   rating1 ~ label_type + pp,
+   data = as.data.frame(desire %>% filter(food_type == "plant_based")), whichRandom = "pp"
+  )
+
+1/desire_anova_bayes
+```
+
+Last, I see whether the results are robust to the exclusion of the two alleged vegetarians: the results don't change.
+```{r desire_anova_no_vegetarians}
+desire_anova_no_vegetarians <- 
+  aov_ez(
+    id = "pp", 
+    dv = "rating1", 
+    data = desire_plants %>% 
+      filter(!pp %in% c("pp_77", "pp_87")), 
+    within = "label_type"
+  )
+
+anova(desire_anova)
+```
+
+
+## 4.2 Main effect of labels on simulations
+
+### 4.2.1 Confirmatory
+I'll fit the same initial model as above, but this time predicting simulations.
+Once more, the model runs into a singularity problem.
+One theta is estimated to be zero.
+```{r h1_simulations_model}
+# get plants-only data set
+simulations_plants <- 
+  simulations %>% 
+  filter(food_type == "plant_based") %>% 
+  mutate(food_type = droplevels(food_type))
+
+# construct model
+h1_simulations_model <- lme4::lmer(
+  rating3 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type | food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_simulations_model)
+
+# check smallest parameter
+getME(h1_simulations_model,"theta")
+
+isSingular(h1_simulations_model, tol = 1e-5)
+```
+
+Again I remove random correlations within the `food` factor to see whether that helps with singularity.
+It doesn't: Now the model cannot estimate a variance around the slope for label2 within `food`.
+```{r h1_simulations_model_no_food_corr}
+# construct model
+h1_simulations_model_no_food_corr <- lmer_alt(
+  rating1 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 + label_type || food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_simulations_model_no_food_corr)
+
+# check smallest parameter
+getME(h1_simulations_model_no_food_corr,"theta")
+
+isSingular(h1_simulations_model_no_food_corr, tol = 1e-5)
+```
+
+Removing the correlations for random terms within `pp` makes the problem worse.
+```{r h1_simulations_model_no_pp_corr}
+# construct model
+h1_simulations_model_no_pp_corr <- lmer_alt(
+  rating1 ~
+    label_type +
+    (1 + label_type || pp) +
+    (1 + label_type | food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+# inspect model
+summary(h1_simulations_model_no_pp_corr)
+```
+
+Next, I see whether changing the optimizer can help and whether estimates are stable across optimizers.
+Once again, not all optimizers converge, which isn't a good sign.
+Also, those that do converge show quite some discrepancies between their random effects.
+```{r h1_desire_model_all_fit}
+h1_simulations_model_all <- afex::all_fit(
+  h1_simulations_model,
+  maxfun = 1e9
+)
+
+# which ones converged
+ok_fits2 <- sapply(h1_simulations_model_all, is, "merMod")
+ok_fits2
+
+# was fit okay?
+!sapply(h1_simulations_model_all, inherits, "try-error")
+
+# compare fixed effects
+ok_fits_details2 <- h1_simulations_model_all[ok_fits2]
+t(sapply(ok_fits_details2, "fixef"))
+
+# compare random effects
+t(sapply(ok_fits_details2, getME, "theta"))
+```
+
+It might be time to further simplify the model to get it to converge.
+Before I begin removing slopes, I'll first run the model without a random intercept for `food` and without correlations between random effects.
+The model doesn't converge still.
+```{r h1_simulations_model_no_intercept}
+# construct model
+h1_simulations_model_no_intercept <- lmer_alt(
+  rating3 ~
+    label_type +
+    (1 + label_type || pp) +
+    (0 + label_type || food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+summary(h1_simulations_model_no_intercept)
+```
+
+Because the random slopes for `label_type` within `food` seemed to lead to singular fit, I'll remove that slope.
+Again, that prevents us from generalizing to other foods (if there is an effect) and p-values for the effect of `label_type` become less conservative.
+The model still throws a warning, but the singularity is within acceptable tolerance.
+```{r h1_simluations_model_no_slope}
+# construct model
+h1_simulations_model_no_slope <- lme4::lmer(
+  rating3 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 | food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  )
+)
+
+summary(h1_simulations_model_no_slope)
+
+# check smallest parameter
+getME(h1_simulations_model_no_slope,"theta")
+
+isSingular(h1_simulations_model_no_slope, tol = 1e-5)
+```
+
+The model diagnostics look fine overall.
+As expected, when we plot fitted values against residulas there are clear cut-offs, because the scale is bounded at 0 and 100, such that a fitted value of 50 can only have a residual of plus or minus 50.
+Looking at potential outliers, participants `pp_158` and `pp_130` stick out slightly for Cook's distance.
+As for foods, `tofu_stir_fty` and `cauliflower_tacos` also stand out.
+In the exploratory section, I'll run a robustness check and see whether the results change if we exclude these participants and foods.
+```{r h1_simulations_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h1_simulations_model_no_slope, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h1_simulations_model_no_slope, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h1_simulations_model_no_slope)
+
+# obtain outliers
+h1_simulations_model_no_slope_outliers_pp <- influence.ME::influence(h1_simulations_model_no_slope, c("pp"))
+h1_simulations_model_no_slope_outliers_food <- influence.ME::influence(h1_simulations_model_no_slope, c("food"))
+
+# plot formal outliers for pp
+plot(h1_simulations_model_no_slope_outliers_pp, which = 'cook')
+plot(h1_simulations_model_no_slope_outliers_pp, which = 'dfbetas')[1]
+plot(h1_simulations_model_no_slope_outliers_pp, which = 'dfbetas')[2]
+plot(h1_simulations_model_no_slope_outliers_pp, which = 'dfbetas')[3]
+plot(h1_simulations_model_no_slope_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h1_simulations_model_no_slope_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h1_simulations_model_no_slope_outliers_food, which = 'cook')
+plot(h1_simulations_model_no_slope_outliers_food, which = 'dfbetas')[1]
+plot(h1_simulations_model_no_slope_outliers_food, which = 'dfbetas')[2]
+plot(h1_simulations_model_no_slope_outliers_food, which = 'dfbetas')[3]
+plot(h1_simulations_model_no_slope_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h1_simulations_model_no_slope_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h1_simulations_model_no_slope, type = c('p', 'smooth'))
+```
+
+Next, I obtain p-values.
+We get the same warning as above.
+The effect is marginally significant, but not at our adjusted alpha level.
+```{r h1_simulations_model_p}
+# get p-value
+h1_simulations_model_no_slope_p <- mixed(
+  rating3 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 | food),
+  simulations_plants,
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  ),
+  type = 3,
+  method = "S"
+)
+
+anova(h1_simulations_model_no_slope_p)
+
+# get approximate effect size
+r.squaredGLMM(h1_simulations_model_no_slope)
+```
+
+### 4.2.2 Exploratory
+Just out of curiousity, I'll run pairwise comparisons to see where groups differ: the only significant difference is between contextual and health positive labels.
+But again, this effect isn't significant at our adjusted alpha level.
+```{r h1_simulations_posthoc}
+h1_simulations_model_posthocs <- 
+  emmeans(
+    h1_simulations_model_no_slope,
+    pairwise ~ label_type
+  )
+
+h1_simulations_model_posthocs
+```
+
+Next, I check whether the results change if we exclude the model outliers, excluding `pp_158`, `pp_130`, `tofu_stir_fty`, and `cauliflower_tacos`.
+The effect becomes less significant, which a) probably indicates that the effect is not robust, but b) could also merely reflect reduced power after excluding quite a number of cases.
+Overall, I believe the effect is not robust.
+```{r h1_simulations_model_no_outliers_p}
+# get p-value
+h1_simulations_model_no_slope_no_outliers_p <- mixed(
+  rating3 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 | food),
+  simulations_plants %>% 
+    filter(!pp %in% c("pp_158", "pp_130")) %>% 
+    filter(!food %in% c("tofu_stir_fty", "cauliflower_tacos")),
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  ),
+  type = 3,
+  method = "S"
+)
+
+anova(h1_simulations_model_no_slope_no_outliers_p)
+```
+
+Last, excluding the two alleged vegetarians doesn't change the results either: the p-value gets a bit lower, but still above our adjusted cut-off.
+```{r h1_simulations_model_no_vegetarians_p}
+# get p-value
+h1_simulations_model_no_slope_no_vegetarians_p <- mixed(
+  rating3 ~
+    label_type +
+    (1 + label_type | pp) +
+    (1 | food),
+  simulations_plants %>% 
+    filter(!pp %in% c("pp_77", "pp_87")),
+  control = lmerControl(
+    optCtrl=list(maxfun=1e9)
+  ),
+  type = 3,
+  method = "S"
+)
+
+anova(h1_simulations_model_no_slope_no_vegetarians_p)
+```
+
+
+## 4.3 Interaction of food type and meat eating frequency
+
+### 4.3.1 Confirmatory
+Next, I see whether there's a main effect of `food_type` across label conditions and whether this effect is moderated by `meat_per_week`.
+`meat_per_week` is a trait-level variable and therefore doesn't need a random slope.
+Otherwise, we keep the same original random effects structure as above.
+I also standardize `meat_per_week` to help with interpretation and convergence.
+
+The model converges without warnings.
+
+```{r h4_food_meat_model}
+# standardize meat eating frequency
+desire <- 
+  desire %>% 
+  mutate(
+    meat_per_week_s = scale(meat_per_week, scale = TRUE)
+  )
+
+# fit model
+h4_food_meat_model <- 
+  lme4::lmer(
+    rating1 ~ 
+      food_type*meat_per_week_s +
+      (1 + food_type | pp) +
+      (1 | food),
+    desire,
+    control = lmerControl(
+      optCtrl=list(maxfun=1e9)
+    )
+  )
+
+summary(h4_food_meat_model)
+```
+
+The model diagnostics look okay, but there is a clear outlier for participants: `pp_87`.
+For foods, there's no clear outliers.
+I'll test the robustness of the model without the one participant in the exploratory section.
+```{r h4_food_meat_model_diagnostics}
+# inspect standardized residuals
+densityplot(resid(h4_food_meat_model, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(h4_food_meat_model, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(h4_food_meat_model)
+
+# obtain outliers
+h4_food_meat_model_outliers_pp <- influence.ME::influence(h4_food_meat_model, c("pp"))
+h4_food_meat_model_outliers_food <- influence.ME::influence(h4_food_meat_model, c("food"))
+
+# plot formal outliers for pp
+plot(h4_food_meat_model_outliers_pp, which = 'cook')
+plot(h4_food_meat_model_outliers_pp, which = 'dfbetas')[1]
+plot(h4_food_meat_model_outliers_pp, which = 'dfbetas')[2]
+plot(h4_food_meat_model_outliers_pp, which = 'dfbetas')[3]
+plot(h4_food_meat_model_outliers_pp, which = 'dfbetas')[4]
+
+# which ones are the highest
+arrange_cook(h4_food_meat_model_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(h4_food_meat_model_outliers_food, which = 'cook')
+plot(h4_food_meat_model_outliers_food, which = 'dfbetas')[1]
+plot(h4_food_meat_model_outliers_food, which = 'dfbetas')[2]
+plot(h4_food_meat_model_outliers_food, which = 'dfbetas')[3]
+plot(h4_food_meat_model_outliers_food, which = 'dfbetas')[4]
+
+# which ones are so far out on cook's distance?
+arrange_cook(h4_food_meat_model_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(h4_food_meat_model, type = c('p', 'smooth'))
+```
+
+Next, I get a p-value and plot the interaction.
+Both the main effect and interaction are significant.
+The effect behaves in the predicted way: participants liked meat-based food more than plant-based foods the more they eat meat.
+```{r h4_food_meat_model_p}
+h4_food_meat_model_p <- 
+  mixed(
+    rating1 ~ 
+      food_type*meat_per_week_s +
+      (1 + food_type | pp) +
+      (1 | food),
+    desire,
+    control = lmerControl(
+      optCtrl=list(maxfun=1e9)
+    ),
+    type = 3, 
+    method = "S"
+  )
+
+anova(h4_food_meat_model_p)
+
+# effect size
+r.squaredGLMM(h4_food_meat_model)
+
+# simple slopes
+emtrends(
+  h4_food_meat_model,
+  pairwise ~ food_type,
+  var = "meat_per_week_s"
+)
+
+plot(
+  effects::effect("food_type:meat_per_week_s", 
+         h4_food_meat_model),
+         ci.style = "bands",
+  multiline = TRUE)
+```
+
+### 4.3.2 Exploratory
+
+Excluding one potential outlier doesn't change the results.
+```{r h4_food_meat_model_p}
+h4_food_meat_model_no_outliers_p <- 
+  mixed(
+    rating1 ~ 
+      food_type*meat_per_week_s +
+      (1 + food_type | pp) +
+      (1 | food),
+    desire %>% 
+      filter(pp != "pp_87"),
+    control = lmerControl(
+      optCtrl=list(maxfun=1e9)
+    ),
+    type = 3, 
+    method = "S"
+  )
+
+anova(h4_food_meat_model_no_outliers_p)
+```
+
+Excluding the two alleged vegetarians (one of whom is actually the outlier above) doesn't change the results either.
+```{r h4_food_meat_model_no_vegetarians}
+h4_food_meat_model_no_vegetarians_p <- 
+  mixed(
+    rating1 ~ 
+      food_type*meat_per_week_s +
+      (1 + food_type | pp) +
+      (1 | food),
+    desire %>% 
+      filter(!pp %in% c("pp_77", "pp_87")),
+    control = lmerControl(
+      optCtrl=list(maxfun=1e9)
+    ),
+    type = 3, 
+    method = "S"
+  )
+
+anova(h4_food_meat_model_no_vegetarians_p)
+```
+
+
+## 4.4 Interaction effect of label type and food type
+
+### 4.4.1 Confirmatory
+For the `food` grouping, each food type could only be plant-based or meat-based, meaning we cannot include a random slope of `food_type`.
+That also means we cannot model the interaction as a random slope nested in `food`.
+We counterbalanced which food was assigned what label type across participants.
+Therefore, we will only model `label_type` as random slope for the `food` grouping.
+
+In contrast, `pp` contains each combination of `food_type` and `label_type` because of counterbalancing.
+That means we can include the interaction as a random effect nested in `pp`.
+
+The model yields a singularity warning again, but at an acceptable level of tolerance.
+```{r desire_model_interaction}
+desire_model_interaction <- lme4::lmer(
+  rating1 ~
+    food_type*label_type + 
+    (1 + food_type*label_type | pp) +
+    (1 + label_type | food),
+  desire
+)
+
+summary(desire_model_interaction)
+
+# check smallest parameter
+getME(desire_model_interaction,"theta")
+
+# not singular at tolerance level
+isSingular(desire_model_interaction, tol = 1e-5)
+```
+
+Again, the model diagnostics look okay.
+There are no clear outlying participants, maybe `pp_15` and `pp_21`.
+For food, `cheeseburger` stands out as a potential outlier.
+I'll run the model without these cases as a robustness check in the exploratory section.
+```{r desire_model_interaction_diagnostics}
+# inspect standardized residuals
+densityplot(resid(desire_model_interaction, scaled = TRUE))
+
+# q-q plot
+car::qqPlot(resid(desire_model_interaction, scaled = TRUE))
+
+# proportion of residuals in the extremes of the distribution
+lmer_residuals(desire_model_interaction)
+
+# obtain outliers
+desire_model_interaction_outliers_pp <- influence.ME::influence(desire_model_interaction, c("pp"))
+desire_model_interaction_outliers_food <- influence.ME::influence(desire_model_interaction, c("food"))
+
+# plot formal outliers for pp
+plot(desire_model_interaction_outliers_pp, which = 'cook')
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[1]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[2]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[3]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[4]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[5]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[6]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[7]
+plot(desire_model_interaction_outliers_pp, which = 'dfbetas')[8]
+
+# which ones are the highest
+arrange_cook(desire_model_interaction_outliers_pp, "pp")
+
+# plot formal outliers for food
+plot(desire_model_interaction_outliers_food, which = 'cook')
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[1]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[2]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[3]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[4]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[5]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[6]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[7]
+plot(desire_model_interaction_outliers_food, which = 'dfbetas')[8]
+
+# which ones are so far out on cook's distance?
+arrange_cook(desire_model_interaction_outliers_food, "food")
+
+# plot the fitted vs. the residuals (to check for homo/heteroskedasticity) with added smoothed line.
+plot(desire_model_interaction, type = c('p', 'smooth'))
+```
+
+Next, I obtain p-values.
+We get the same warning as above.
+As expected from the plots, only the main effect of `food_type` is significant.
+```{r desire_model_interaction_p}
+# get p-value
+desire_model_interaction_p <- mixed(
+  rating1 ~
+    label_type*food_type +
+    (1 + label_type*food_type | pp) +
+    (1 + label_type | food),
+  desire,
+  type = 3,
+  method = "S"
+)
+
+# summary
+summary(desire_model_interaction_p)
+
+# get p-values
+anova(desire_model_interaction_p)
+
+# get approximate effect size
+r.squaredGLMM(desire_model_interaction)
+```
+
+### 4.4.2 Exploratory
+Just to explore, I also look at the pairwise comparisons between `food_labels`.
+None of the differences are large enough to reach significance.
+```{r desire_model_posthocs}
+desire_model_posthocs <- 
+  emmeans(
+    desire_model_interaction,
+    pairwise ~ label_type
+  )
+
+desire_model_posthocs
+```
+
+The conclusions don't change when excluding potential outliers.
+```{r desire_model_interaction_no_outliers_p}
+# get p-value
+desire_model_interaction_no_outliers_p <- mixed(
+  rating1 ~
+    label_type*food_type +
+    (1 + label_type*food_type | pp) +
+    (1 + label_type | food),
+  desire %>% 
+    filter(!pp %in% c("pp15", "pp_21")) %>% 
+    filter(food != "cheeseburger"),
+  type = 3,
+  method = "S"
+)
+
+# get p-values
+anova(desire_model_interaction_no_outliers_p)
+```
+
+Neither do conclusions change when excluding the two alleged vegetarians.
+```{r desire_model_interaction_no_vegetarians_p}
+# get p-value
+desire_model_interaction_no_vegetarians_p <- mixed(
+  rating1 ~
+    label_type*food_type +
+    (1 + label_type*food_type | pp) +
+    (1 + label_type | food),
+  desire %>% 
+    filter(!pp %in% c("pp77", "pp_87")),
+  type = 3,
+  method = "S"
+)
+
+# get p-values
+anova(desire_model_interaction_no_vegetarians_p)
+```
+
+## 4.4 Intention to reduce eating meat and desire
+Last, we want to know the correlation between the intention to reduce eating meat and desire for plant-based foods.
+I aggregate by participant first and then compute the correlation per food type.
+```{r intention_desire_correlation}
+desire_aggregated <- 
+  desire %>% 
+  group_by(pp, food_type) %>% 
+  summarize(
+    mean_rating = mean(rating1) # get aggregated desire ratings
+  ) %>% 
+  left_join( # add the intention to change diet
+    .,
+    desire %>% select(pp, change_diet) %>% group_by(pp) %>% slice(1) %>% ungroup(),
+    by = "pp"
+  )
+
+# plot
+ggplot(
+  desire_aggregated,
+  aes(
+    x = change_diet,
+    y = mean_rating,
+    color = food_type
+  )
+) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+desire_aggregated %>% 
+  group_by(food_type) %>% 
+  summarize(
+    r = cor.test(mean_rating, change_diet)$estimate,
+    p = cor.test(mean_rating, change_diet)$p.value
+  )
+```
+
+# 5. Write final files
+Last, I write the final analysis files.
+I also save the six models from which I will extract parameters for plotting (see `plots.Rmd`).
+```{r write_final_files}
+# save models
+save(
+  h1_simulations_model_no_slope,
+  h1_simulations_model_no_slope,
+  h4_food_meat_model,
+  desire_model_interaction,
+  file = here("plots", "models", "models_study2.RData")
+)
+
+# final file
+write_csv(working_file, here("data", "study2", "analysis_file.csv"))
+
+# attractiveness only
+write_csv(desire, here("data", "study2", "desire.csv"))
+
+# simulations only
+write_csv(simulations, here("data", "study2", "simulations.csv"))
+```
