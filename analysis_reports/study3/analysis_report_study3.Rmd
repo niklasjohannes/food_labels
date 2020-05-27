@@ -45,6 +45,7 @@ p_load(
   afex,
   lsmeans,
   MuMIn,
+  mediation,
   tidyverse
 )
 
@@ -3214,6 +3215,7 @@ Below I want to see whether this also happens when predicting simulations with a
 These tests follow the logic of the classic Sobel test.
 
 When simulations predict attractiveness, the direct effect of label type is greatly decreased, more than when attractiveness predicts simulations.
+These patterns are consistent with a conditional independence of attractiveness of label type, conditional on knowing simulations.
 ```{r sobel_tests}
 ### sobel test simulations predicting attractiveness
 
@@ -3289,7 +3291,56 @@ attr_sim_label <-
 summary(attr_sim_label)
 ```
 
-I'll run a formal mediation model on these analyses.
+Next, I conduct a formal mediation analysis with the `mediation::mediate` command.
+For some reason, `mediate` doesn't take an individual-level factor as predicor, so I have to transform the `label_type` factor to numerical.
+Not a big problem, because we only have two levels.
+Also, `mediate` doesn't work with crossed-level factors, meaning that we need to remove the random effects of `food`.
+
+We can see that the effect of `label_type` on attractiveness is fully mediated by simulations, as the average causal mediation effect is large (larger than the total effect, because the direct effect is negative) and significant, whereas the direct effect is small and nonsignificant.
+```{r sim_attr_mediation}
+options(contrasts = c("contr.sum", "contr.poly")) # sum to zero contrasts
+
+# recode to numerical
+wide_data <- 
+  wide_data %>% 
+  mutate(
+    label_type_n = if_else(label_type == "control", 0, 1)
+  )
+
+# model predicting mediator
+med_fit <- 
+  lme4::lmer(
+  simulation_rating ~
+    label_type_n +
+    (1 + label_type_n | pp),
+  wide_data
+  )
+
+# model predicting outcome
+out_fit <- 
+  lme4::lmer(
+    attractiveness_rating ~
+      label_type_n + simulation_rating +
+      (1 + label_type_n + simulation_rating | pp),
+    wide_data
+  )
+
+# mediation model
+mediation_model <- 
+  mediation::mediate(
+    med_fit,
+    out_fit,
+    treat = "label_type_n",
+    mediator = "simulation_rating",
+    control.value = 0,
+    treat.value = 1,
+    sims = 1000
+  )
+
+summary(mediation_model)
+plot(mediation_model)
+```
+
 
 # 5. Write final files
 Last, I write the final analysis files.
