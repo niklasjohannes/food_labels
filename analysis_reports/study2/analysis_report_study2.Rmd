@@ -13,8 +13,8 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, 
-                      message = TRUE, 
-                      warning = TRUE,
+                      message = FALSE, 
+                      warning = FALSE,
                       cache = TRUE)
 ```
 
@@ -1278,6 +1278,18 @@ working_file <-
     rating3,
     everything()
   )
+
+# inspect aggregated M and SD per condition
+working_file %>% 
+  filter(measure == "simulations") %>% 
+  group_by(pp, label_type) %>%
+  summarize(mean_agg = mean(rating3, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(label_type) %>% 
+  summarize(
+    mean = mean(mean_agg),
+    sd = sd(mean_agg)
+  )
 ```
 
 First, I inspect the overall simulation ratings, regardless of label or food type.
@@ -1328,7 +1340,7 @@ working_file %>%
 
 Let's inspect the ratings per food type.
 Again, participants seemed to simulate more for meat-based foods.
-```{r describe_desire_food_type}
+```{r describe_simulations_food_type}
 rc_plot(
   working_file,
   "simulations",
@@ -1363,7 +1375,7 @@ working_file %>%
 Next, line plots to inspect possible interactions. 
 Again, the plot seems to show two main effects: plant-based foods elicit more simulations than plant-based foods and the pattern for label type is similar.
 There might be a difference for sensoty labels which doesn't increase compared to neutral labels in the plant-based condition, but does increase in the meat-based condition.
-```{r describe_desire_interaction}
+```{r describe_simulations_interaction}
 rc_plot(
   working_file,
   "simulations",
@@ -1502,7 +1514,7 @@ It's not clear where the model hits the boundary, as there are no random effects
 Inspecting the thetas shows that the random slope of one label is estimated very close to zero.
 ```{r h1_desire_model}
 # set contrasts
-options(contrasts = c("contr.sum", "contr.poly"))
+options(contrasts = c("contr.sum", "contr.poly")) 
 
 # get a plants-only data set
 desire_plants <- 
@@ -1746,6 +1758,9 @@ simulations_plants <-
   filter(food_type == "plant_based") %>% 
   mutate(food_type = droplevels(food_type))
 
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
 # construct model
 h1_simulations_model <- lme4::lmer(
   rating3 ~
@@ -1812,7 +1827,7 @@ summary(h1_simulations_model_no_pp_corr)
 Next, I see whether changing the optimizer can help and whether estimates are stable across optimizers.
 Once again, not all optimizers converge, which isn't a good sign.
 Also, those that do converge show quite some discrepancies between their random effects.
-```{r h1_desire_model_all_fit}
+```{r h1_simulations_model_all_fit}
 h1_simulations_model_all <- afex::all_fit(
   h1_simulations_model,
   maxfun = 1e9
@@ -1883,7 +1898,7 @@ As for foods, `tofu_stir_fty` and `cauliflower_tacos` also stand out.
 In the exploratory section, I'll run a robustness check and see whether the results change if we exclude these participants and foods.
 ```{r h1_simulations_model_diagnostics}
 # inspect standardized residuals
-densityplot(resid(h1_simulations_model_no_slope, scaled = TRUE))
+densityplot(resid(h1_simulations_model_no_slope, scaled = TRUE)) 
 
 # q-q plot
 car::qqPlot(resid(h1_simulations_model_no_slope, scaled = TRUE))
@@ -2018,6 +2033,9 @@ desire <-
     meat_per_week_s = scale(meat_per_week, scale = TRUE)
   )
 
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly")) 
+
 # fit model
 h4_food_meat_model <- 
   lme4::lmer(
@@ -2039,7 +2057,7 @@ For foods, there's no clear outliers.
 I'll test the robustness of the model without the one participant in the exploratory section.
 ```{r h4_food_meat_model_diagnostics}
 # inspect standardized residuals
-densityplot(resid(h4_food_meat_model, scaled = TRUE))
+densityplot(resid(h4_food_meat_model, scaled = TRUE)) 
 
 # q-q plot
 car::qqPlot(resid(h4_food_meat_model, scaled = TRUE))
@@ -2109,13 +2127,13 @@ plot(
   effects::effect("food_type:meat_per_week_s", 
          h4_food_meat_model),
          ci.style = "bands",
-  multiline = TRUE)
+  multiline = TRUE) 
 ```
 
 ### 4.3.2 Exploratory
 
 Excluding one potential outlier doesn't change the results.
-```{r h4_food_meat_model_p}
+```{r h4_food_meat_model_no_outliers_p}
 h4_food_meat_model_no_outliers_p <- 
   mixed(
     rating1 ~ 
@@ -2131,7 +2149,7 @@ h4_food_meat_model_no_outliers_p <-
     method = "S"
   )
 
-anova(h4_food_meat_model_no_outliers_p)
+anova(h4_food_meat_model_no_outliers_p) 
 ```
 
 Excluding the two alleged vegetarians (one of whom is actually the outlier above) doesn't change the results either.
@@ -2151,7 +2169,7 @@ h4_food_meat_model_no_vegetarians_p <-
     method = "S"
   )
 
-anova(h4_food_meat_model_no_vegetarians_p)
+anova(h4_food_meat_model_no_vegetarians_p) 
 ```
 
 
@@ -2168,6 +2186,9 @@ That means we can include the interaction as a random effect nested in `pp`.
 
 The model yields a singularity warning again, but at an acceptable level of tolerance.
 ```{r desire_model_interaction}
+# set contrasts
+options(contrasts = c("contr.sum", "contr.poly"))
+
 desire_model_interaction <- lme4::lmer(
   rating1 ~
     food_type*label_type + 
@@ -2182,7 +2203,7 @@ summary(desire_model_interaction)
 getME(desire_model_interaction,"theta")
 
 # not singular at tolerance level
-isSingular(desire_model_interaction, tol = 1e-5)
+isSingular(desire_model_interaction, tol = 1e-5) 
 ```
 
 Again, the model diagnostics look okay.
@@ -2191,7 +2212,7 @@ For food, `cheeseburger` stands out as a potential outlier.
 I'll run the model without these cases as a robustness check in the exploratory section.
 ```{r desire_model_interaction_diagnostics}
 # inspect standardized residuals
-densityplot(resid(desire_model_interaction, scaled = TRUE))
+densityplot(resid(desire_model_interaction, scaled = TRUE)) 
 
 # q-q plot
 car::qqPlot(resid(desire_model_interaction, scaled = TRUE))
@@ -2257,7 +2278,7 @@ summary(desire_model_interaction_p)
 anova(desire_model_interaction_p)
 
 # get approximate effect size
-r.squaredGLMM(desire_model_interaction)
+r.squaredGLMM(desire_model_interaction) 
 ```
 
 ### 4.4.2 Exploratory
@@ -2270,7 +2291,7 @@ desire_model_posthocs <-
     pairwise ~ label_type
   )
 
-desire_model_posthocs
+desire_model_posthocs 
 ```
 
 The conclusions don't change when excluding potential outliers.
@@ -2289,7 +2310,7 @@ desire_model_interaction_no_outliers_p <- mixed(
 )
 
 # get p-values
-anova(desire_model_interaction_no_outliers_p)
+anova(desire_model_interaction_no_outliers_p) 
 ```
 
 Neither do conclusions change when excluding the two alleged vegetarians.
