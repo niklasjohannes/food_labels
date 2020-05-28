@@ -15,7 +15,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE, 
                       message = FALSE, 
                       warning = FALSE,
-                      cache = TRUE)
+                      cache = FALSE)
 ```
 
 In this file, I produce the graphs for the analysis section.
@@ -45,7 +45,7 @@ loadfonts(device = "win")
 
 set.seed(42)
 
-options(contrasts = c("contr.sum", "contr.poly"))
+options(contrasts = c("contr.sum", "contr.poly")) 
 ```
 
 ```{r functions}
@@ -988,7 +988,7 @@ wordcloud_plant_based <-
 wordcloud_plant_based
 ```
 
-# Study 2
+# 2. Study 2
 
 ## 2.1 Load and prepare data
 Next, I load the final data files from Study 2 that I saved at the end of the analysis report (`analysis_report_study2.Rmd`).
@@ -1251,7 +1251,7 @@ summary_stats_all_simulations_study2 <-
 ```
 
 Alright, now the raincloud plot.
-```{r make_it_rain_desire_study2}
+```{r make_it_rain_simulations_study2}
 rc_plot_simulations_study2 <-
   ggplot(
     study2 %>%
@@ -1549,7 +1549,7 @@ rc_plot_study3 <-
   xlab("Description Type") +
   labs(fill = "Food Type", # otherwise I get two legends
        color = "Food Type") +
-  scale_x_discrete(labels = c('Control','Enhanced')) + # rename the x axis after transforming it to numeric earlier
+  scale_x_discrete(labels = c('Control','Simulation-based')) + # rename the x axis after transforming it to numeric earlier
   scale_color_manual(values = c("#009E73", "#D55E00")) +
   scale_fill_manual(values = c("#009E73", "#D55E00")) +
   theme_cowplot() +
@@ -1560,7 +1560,7 @@ rc_plot_study3 <-
     ), 
     strip.background.x = element_blank(),
     axis.text.x = element_text(
-      size = 22
+      size = 20
     ),
     legend.title = element_text(
       size = 22
@@ -1579,7 +1579,7 @@ rc_plot_study3
 Plots for the interaction of intention to reduce eating meat and food type.
 ```{r change_diet_food_type_interaction_study3}
 # get models
-load(here("plots", "models_study3", "models.RData"))
+load(here("plots", "models", "models_study3.RData"))
 
 # get the data set
 h4_effects <-
